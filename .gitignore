@@ -1,2 +1,52 @@
 # document private files
 document/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# LlamaIndex / RAG
+storage/
+chroma_db/
+chroma/
+db/
+vector_db/
+
+# Data
+data/
+dataset/
+datasets/
+uploads/
+outputs/
+
+# Models
+models/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
