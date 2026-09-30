@@ -216,6 +216,13 @@ function renderFiles() {
   // Text "3/5 tài liệu được chọn"
   $('sel-sum').textContent = sel + '/' + rd.length + ' tài liệu được chọn';
 
+  // Nút "Xóa (n) mục đã chọn": chỉ hiện khi có ≥1 file đang được tick.
+  // Mỗi lần render lại (kể cả do đổi lựa chọn) đều hủy trạng thái "armed" cũ,
+  // tránh trường hợp bấm lần 2 xóa nhầm theo số lượng đã lỗi thời.
+  disarmBulkDelete();
+  $('bulk-del-btn').hidden = sel === 0;
+  $('bulk-del-label').textContent = 'Xóa (' + sel + ')';
+
   // Số file hiển thị trên badge nút "Nguồn" (mobile)
   $('src-toggle').dataset.n = arr.length;
 
@@ -326,26 +333,66 @@ $('select-all').onchange = e => {
   renderFiles();
 };
 
-// Cập nhật khu vực composer: chip ngữ cảnh + nút Gửi/Dừng
+/* -----------------------------------------------------------------------
+ * NÚT "XÓA (n) MỤC ĐÃ CHỌN" — cùng cơ chế xác nhận 2 bước với nút xóa hội thoại
+ * -------------------------------------------------------------------- */
+let bulkDelTimer = null;
+
+const disarmBulkDelete = () => {
+  clearTimeout(bulkDelTimer);
+  const b = $('bulk-del-btn');
+  if (b.classList.contains('armed')) {
+    b.classList.remove('armed');
+    const sel = readyFiles().filter(f => f.selected).length;
+    $('bulk-del-label').textContent = 'Xóa (' + sel + ')';
+  }
+};
+
+$('bulk-del-btn').onclick = () => {
+  const b = $('bulk-del-btn');
+  const targets = readyFiles().filter(f => f.selected);
+  if (!targets.length) return;
+
+  // Lần 1: chuyển sang trạng thái "armed" (chờ xác nhận), tự hủy sau 3s
+  if (!b.classList.contains('armed')) {
+    b.classList.add('armed');
+    $('bulk-del-label').textContent = 'Xóa thật?';
+    b.setAttribute('aria-label', 'Bấm lần nữa để xóa ' + targets.length + ' tài liệu đã chọn');
+    bulkDelTimer = setTimeout(disarmBulkDelete, 3000);
+    return;
+  }
+
+  // Lần 2: XÓA THẬT
+  clearTimeout(bulkDelTimer);
+  targets.forEach(f => { f.abort && f.abort(); state.files.delete(f.id); });
+  renderFiles();
+  toast('Đã xóa ' + targets.length + ' tài liệu.', 'ok');
+};
+
+// Cập nhật khu vực composer: badge trên icon đính kèm + nút Gửi/Dừng
+// (Trước đây có chip text "3/5 tài liệu của bạn" ngay trong ô nhập — đã bỏ để composer
+// gọn hơn; trạng thái phạm vi giờ chỉ còn 1 badge số nhỏ trên icon đính kèm, chi tiết đầy
+// đủ vẫn xem ở panel "Nguồn" bên trái.)
 function updateComposer() {
   const rd = readyFiles();
   const sel = rd.filter(f => f.selected).length;
-  const ctx = $('ctx');
+  const badge = $('attach-badge');
+  const btn = $('attach-btn');
 
-  // Logic chọn icon + text hiển thị:
-  // - Nếu đang upload → "Đang xử lý tài liệu…"
-  // - Nếu không chọn file → "Kho dữ liệu chung"
-  // - Nếu có chọn → "3/5 tài liệu của bạn"
-  const [icon, text] = isBusy()
-    ? ['file-text', 'Đang xử lý tài liệu…']
-    : !sel
-      ? ['book', 'Kho dữ liệu chung']
-      : ['file-text', `${sel}/${rd.length} tài liệu của bạn`];
+  if (sel > 0) {
+    badge.hidden = false;
+    badge.textContent = sel > 99 ? '99+' : sel;
+  } else {
+    badge.hidden = true;
+  }
 
-  ctx.innerHTML = ico(icon);
-  const sp = document.createElement('span');
-  sp.textContent = text;
-  ctx.appendChild(sp);
+  // aria-label mô tả đầy đủ phạm vi hiện tại — để không mất thông tin với screen reader
+  // dù phần hiển thị bằng mắt chỉ còn 1 con số nhỏ trên badge.
+  const scopeDesc = isBusy()
+    ? 'đang xử lý tài liệu'
+    : !sel ? 'đang tìm trong kho dữ liệu chung' : `đang giới hạn trong ${sel}/${rd.length} tài liệu đã chọn`;
+  btn.setAttribute('aria-label', `Thêm file PDF (${scopeDesc})`);
+  btn.title = 'Thêm file PDF — ' + scopeDesc;
 
   syncSend();
 }
