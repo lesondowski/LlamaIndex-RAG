@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import pymupdf
 import re
 
+
+
 class PDFLoader:
 
     def load(self, file_path: str, chapter: str | None = None) -> list:
@@ -132,5 +134,3 @@ class PDFLoader:
         dst.close()
         src.close()
         return page_map
-
-
