@@ -54,18 +54,17 @@ window.api = (() => {
    * -------------------------------------------------------------------------- */
   const CONFIG = {
     // Cờ quyết định dùng mock hay backend thật. Đây là "công tắc" duy nhất.
-    USE_MOCK: true,
-
+    USE_MOCK: false,
     // BASE: URL gốc của backend
     // - Nếu chạy qua HTTP/HTTPS (http:// hoặc https://) → dùng chính origin hiện tại
     //   VD: đang ở https://app.example.com → BASE = https://app.example.com
     // - Nếu mở file trực tiếp (file://) → fallback về localhost:8000
     //   (tránh lỗi khi mở index.html bằng double-click)
-    BASE: location.protocol.startsWith('http') ? location.origin : 'http://localhost:8000',
+    BASE: location.port === '8000' ? location.origin : 'http://127.0.0.1:8000',
 
     // EP = Endpoint. Khi backend đổi path, CHỈ SỬA Ở ĐÂY.
     // chat: '/query/stream' trả về SSE (Server-Sent Events)
-    EP: { upload: '/upload', chat: '/query/stream', health: '/health' },
+    EP: { upload: '/upload', files: '/files', chat: '/query/stream', health: '/health' },
 
     // Giới hạn kích thước file: 50 * 1024 * 1024 bytes = 50 MB
     MAX_FILE_SIZE: 50 * 1024 * 1024,
@@ -266,6 +265,25 @@ window.api = (() => {
     // Trả về object giống interface uploadMock
     // abort() gọi xhr.abort() → trigger onabort → reject AbortError
     return { promise, abort: () => xhr.abort() };
+  }
+
+  /* --------------------------------------------------------------------------
+   * listFilesReal / deleteFileReal — đồng bộ panel "Nguồn" với danh sách thật
+   * trên backend (GET/DELETE /files), thay vì chỉ sống trong state.files ở RAM.
+   * -------------------------------------------------------------------------- */
+  async function listFilesReal() {
+    const res = await fetch(CONFIG.BASE + CONFIG.EP.files);
+    if (!res.ok) throw fail('server', 'HTTP ' + res.status);
+    const data = await res.json();
+    return Array.isArray(data.files) ? data.files : [];
+  }
+
+  async function deleteFileReal(fileId) {
+    const res = await fetch(CONFIG.BASE + CONFIG.EP.files + '/' + fileId, { method: 'DELETE' });
+    if (res.status === 204 || res.ok) return;
+    let detail = '';
+    try { detail = (await res.json()).detail || ''; } catch (_) {}
+    throw fail('server', 'HTTP ' + res.status + ' ' + detail);
   }
 
   /* --------------------------------------------------------------------------
@@ -642,13 +660,15 @@ window.api = (() => {
    * -------------------------------------------------------------------------- */
   async function checkHealth() {
     try {
-      await fetch(CONFIG.BASE + CONFIG.EP.health);
-      return true;
+      const res = await fetch(CONFIG.BASE + CONFIG.EP.health);
+      // res.ok chỉ đúng với HTTP 2xx. Coi mọi phản hồi khác (kể cả 404) là "mất kết nối",
+      // tránh huy hiệu báo "đã kết nối" nhầm khi CONFIG.BASE trỏ sai server.
+      return res.ok;
     } catch (_) {
+      // fetch ném lỗi khi mất mạng, server chưa chạy, hoặc bị CORS chặn.
       return false;
     }
   }
-
   /* --------------------------------------------------------------------------
    * PUBLIC API — Chỉ export 5 thứ ra ngoài
    * --------------------------------------------------------------------------
@@ -675,6 +695,13 @@ window.api = (() => {
     uploadFile: (f, cb) => (CONFIG.USE_MOCK ? uploadMock : uploadReal)(f, cb),
 
     // sendChat: tương tự — wrapper chọn mock/real
-    sendChat: (req, h) => (CONFIG.USE_MOCK ? chatMock : chatReal)(req, h)
+    sendChat: (req, h) => (CONFIG.USE_MOCK ? chatMock : chatReal)(req, h),
+
+    // listFiles: chế độ mock không có gì để liệt kê (không có backend lưu file thật)
+    // → trả mảng rỗng, panel Nguồn coi như phiên mới, đúng hành vi mock từ trước giờ.
+    listFiles: () => (CONFIG.USE_MOCK ? Promise.resolve([]) : listFilesReal()),
+
+    // deleteFile: mock không cần gọi gì (file chỉ tồn tại ở RAM UI)
+    deleteFile: fileId => (CONFIG.USE_MOCK ? Promise.resolve() : deleteFileReal(fileId))
   };
 })();

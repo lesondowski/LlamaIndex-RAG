@@ -113,11 +113,48 @@ function setStatus(mode) {
 // Khởi tạo status ban đầu: nếu mock → demo, ngược lại → checking
 setStatus(CONFIG.USE_MOCK ? 'demo' : 'checking');
 
-// Nếu dùng backend thật → ping health mỗi 20s
+// Nếu dùng backend thật → ping health mỗi 20s + nạp lại danh sách file đã tải lên trước đó.
+// (Trước đây phần nạp lại này không tồn tại: state.files luôn khởi tạo rỗng, nên dù backend
+// đã lưu file từ phiên trước, panel "Nguồn" vẫn trống cho tới khi user upload lại trong
+// phiên hiện tại. loadExistingFiles() là phần vá cho đúng lỗi đó.)
 if (!CONFIG.USE_MOCK) {
   const chk = async () => setStatus(await api.checkHealth() ? 'ok' : 'offline');
   chk();                        // Chạy ngay lần đầu
   setInterval(chk, 20000);      // Rồi lặp mỗi 20s
+  loadExistingFiles();
+}
+
+// Gọi GET /files lúc mở trang, dựng lại state.files từ dữ liệu backend đã lưu sẵn.
+// Các file này bỏ qua hẳn trạng thái 'uploading'/'processing' vì thực tế đã xong từ trước —
+// vào thẳng 'ready'. Không có `blob` (không còn File object gốc trong bộ nhớ trình duyệt),
+// nên nút "Thử lại" sẽ không áp dụng cho các file này (chỉ hiện khi status === 'error').
+async function loadExistingFiles() {
+  let list;
+  try {
+    list = await api.listFiles();
+  } catch (e) {
+    // Không toast ở đây: health-check phía trên đã đủ báo "Không thể kết nối máy chủ"
+    // nếu backend thật sự không phản hồi — tránh 2 thông báo lỗi trùng ý cùng lúc.
+    console.error('[App] load existing files error', e);
+    return;
+  }
+
+  for (const item of list) {
+    const id = uid('file');
+    state.files.set(id, {
+      id,
+      name: item.name,
+      size: item.size,
+      type: 'application/pdf',
+      status: 'ready',
+      progress: 100,
+      selected: true,
+      blob: null,
+      serverId: item.file_id
+    });
+  }
+  renderFiles();
+  updateComposer();
 }
 
 /* ----------------------------------------------------------------------------
@@ -315,6 +352,17 @@ function renderFiles() {
     x.setAttribute('aria-label', 'Xóa ' + f.name);
     x.onclick = () => {
       f.abort && f.abort();        // Hủy upload nếu đang chạy
+
+      // Chỉ gọi xóa trên backend nếu file đã có serverId (tức đã upload xong thật sự).
+      // Chạy nền, không chặn UI: xóa khỏi danh sách ngay cho mượt, nếu backend từ chối
+      // thì báo lại bằng toast — không rollback lại vào danh sách để tránh nhấp nháy.
+      if (f.serverId) {
+        api.deleteFile(f.serverId).catch(e => {
+          console.error('[App] delete error', e);
+          toast('Không xóa được "' + f.name + '" trên máy chủ (vẫn ẩn khỏi danh sách ở đây).', 'warn');
+        });
+      }
+
       state.files.delete(f.id);    // Xóa khỏi Map
       renderFiles();               // Render lại
     };
@@ -362,9 +410,15 @@ $('bulk-del-btn').onclick = () => {
     return;
   }
 
-  // Lần 2: XÓA THẬT
+  // Lần 2: XÓA THẬT — cùng nguyên tắc với nút X: chạy nền, không chặn UI.
   clearTimeout(bulkDelTimer);
-  targets.forEach(f => { f.abort && f.abort(); state.files.delete(f.id); });
+  targets.forEach(f => {
+    f.abort && f.abort();
+    if (f.serverId) {
+      api.deleteFile(f.serverId).catch(e => console.error('[App] bulk delete error', e));
+    }
+    state.files.delete(f.id);
+  });
   renderFiles();
   toast('Đã xóa ' + targets.length + ' tài liệu.', 'ok');
 };

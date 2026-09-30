@@ -1,0 +1,7 @@
+[project]
+dependencies = [
+    "fastapi",          # framework web
+    "uvicorn[standard]",# ASGI server để chạy ứng dụng
+    "python-multipart", # BẮT BUỘC để FastAPI phân tích form multipart/form-data;
+                        # thiếu gói này, endpoint có UploadFile sẽ báo lỗi khi khởi động
+]
