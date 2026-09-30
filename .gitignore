@@ -22,7 +22,6 @@ env/
 .ipynb_checkpoints/
 
 # LlamaIndex / RAG
-storage/
 chroma_db/
 chroma/
 db/
@@ -32,8 +31,35 @@ vector_db/
 data/
 dataset/
 datasets/
-uploads/
 outputs/
+
+# ============================================================================
+# RUNTIME DATA — backend/storage/
+# ----------------------------------------------------------------------------
+# Dữ liệu thay đổi khi app chạy (user upload, vector index, cache) nằm
+# trong backend/storage/. KHÔNG commit vì:
+#   1. Kích thước lớn (PDF, index có thể lên GB)
+#   2. Thay đổi liên tục → commit history rác
+#   3. Không cần thiết cho người clone repo
+#
+# Giữ folder tồn tại trên Git bằng .gitkeep. Không dùng pattern chung
+# "storage/" vì Git sẽ bỏ qua toàn bộ folder cha trước khi kịp xét ngoại lệ.
+# ============================================================================
+
+# Chặn mọi nội dung trong backend/storage/
+backend/storage/*
+
+# Ngoại lệ: giữ .gitkeep của storage/ (nếu có)
+!backend/storage/.gitkeep
+
+# Ngoại lệ: cho phép Git đi vào subfolder uploads/
+!backend/storage/uploads/
+
+# Chặn mọi file user upload trong uploads/
+backend/storage/uploads/*
+
+# Ngoại lệ: giữ .gitkeep của uploads/ (file duy nhất trong folder này lên Git)
+!backend/storage/uploads/.gitkeep
 
 # Models
 models/
