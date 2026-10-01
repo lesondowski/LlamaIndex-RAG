@@ -55,7 +55,15 @@
         </div>
         <p class="src-note" id="src-note">Tùy chọn: tài liệu bạn thêm sẽ giới hạn phạm vi tra cứu. Không tải lên vẫn hỏi được.</p>
         <input type="file" id="file-input" accept=".pdf,application/pdf" multiple hidden>
-        <label class="select-all" id="select-all-row" hidden><input type="checkbox" id="select-all"> Chọn tất cả <span class="sum" id="sel-sum"></span></label>
+        <div class="select-all-row" id="select-all-row" hidden>
+          <div class="sar-top">
+            <label class="select-all"><input type="checkbox" id="select-all"> Chọn tất cả</label>
+            <button class="bulk-del-btn" id="bulk-del-btn" hidden aria-label="Xóa các tài liệu đã chọn">
+              <svg class="i"><use href="#i-trash"/></svg><span id="bulk-del-label"></span>
+            </button>
+          </div>
+          <span class="sum" id="sel-sum"></span>
+        </div>
         <div id="src-list"></div>
       </div>
     </aside>
@@ -77,12 +85,12 @@
       </div>
       <div class="input-container">
         <div class="composer">
+          <button class="icon-btn" id="attach-btn" title="Thêm file PDF" aria-label="Thêm file PDF">
+            <svg class="i"><use href="#i-clip"/></svg>
+            <span class="attach-badge" id="attach-badge" hidden></span>
+          </button>
           <textarea id="user-input" rows="1" placeholder="Nhập câu hỏi về báo cáo tài chính…" aria-label="Câu hỏi"></textarea>
-          <div class="composer-bar">
-            <button class="icon-btn" id="attach-btn" title="Thêm file PDF" aria-label="Thêm file PDF"><svg class="i"><use href="#i-clip"/></svg></button>
-            <div class="ctx" id="ctx"></div>
-            <button class="send-btn" id="send-btn" title="Gửi" aria-label="Gửi câu hỏi" disabled><svg class="i"><use href="#i-arrow-up"/></svg></button>
-          </div>
+          <button class="send-btn" id="send-btn" title="Gửi" aria-label="Gửi câu hỏi" disabled><svg class="i"><use href="#i-arrow-up"/></svg></button>
         </div>
         <div class="fine"><span class="kb">Enter để gửi · Shift+Enter xuống dòng</span><span>AI có thể sai sót, hãy đối chiếu với báo cáo gốc.</span></div>
       </div>

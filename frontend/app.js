@@ -113,11 +113,48 @@ function setStatus(mode) {
 // Khởi tạo status ban đầu: nếu mock → demo, ngược lại → checking
 setStatus(CONFIG.USE_MOCK ? 'demo' : 'checking');
 
-// Nếu dùng backend thật → ping health mỗi 20s
+// Nếu dùng backend thật → ping health mỗi 20s + nạp lại danh sách file đã tải lên trước đó.
+// (Trước đây phần nạp lại này không tồn tại: state.files luôn khởi tạo rỗng, nên dù backend
+// đã lưu file từ phiên trước, panel "Nguồn" vẫn trống cho tới khi user upload lại trong
+// phiên hiện tại. loadExistingFiles() là phần vá cho đúng lỗi đó.)
 if (!CONFIG.USE_MOCK) {
   const chk = async () => setStatus(await api.checkHealth() ? 'ok' : 'offline');
   chk();                        // Chạy ngay lần đầu
   setInterval(chk, 20000);      // Rồi lặp mỗi 20s
+  loadExistingFiles();
+}
+
+// Gọi GET /files lúc mở trang, dựng lại state.files từ dữ liệu backend đã lưu sẵn.
+// Các file này bỏ qua hẳn trạng thái 'uploading'/'processing' vì thực tế đã xong từ trước —
+// vào thẳng 'ready'. Không có `blob` (không còn File object gốc trong bộ nhớ trình duyệt),
+// nên nút "Thử lại" sẽ không áp dụng cho các file này (chỉ hiện khi status === 'error').
+async function loadExistingFiles() {
+  let list;
+  try {
+    list = await api.listFiles();
+  } catch (e) {
+    // Không toast ở đây: health-check phía trên đã đủ báo "Không thể kết nối máy chủ"
+    // nếu backend thật sự không phản hồi — tránh 2 thông báo lỗi trùng ý cùng lúc.
+    console.error('[App] load existing files error', e);
+    return;
+  }
+
+  for (const item of list) {
+    const id = uid('file');
+    state.files.set(id, {
+      id,
+      name: item.name,
+      size: item.size,
+      type: 'application/pdf',
+      status: 'ready',
+      progress: 100,
+      selected: true,
+      blob: null,
+      serverId: item.file_id
+    });
+  }
+  renderFiles();
+  updateComposer();
 }
 
 /* ----------------------------------------------------------------------------
@@ -216,6 +253,13 @@ function renderFiles() {
   // Text "3/5 tài liệu được chọn"
   $('sel-sum').textContent = sel + '/' + rd.length + ' tài liệu được chọn';
 
+  // Nút "Xóa (n) mục đã chọn": chỉ hiện khi có ≥1 file đang được tick.
+  // Mỗi lần render lại (kể cả do đổi lựa chọn) đều hủy trạng thái "armed" cũ,
+  // tránh trường hợp bấm lần 2 xóa nhầm theo số lượng đã lỗi thời.
+  disarmBulkDelete();
+  $('bulk-del-btn').hidden = sel === 0;
+  $('bulk-del-label').textContent = 'Xóa (' + sel + ')';
+
   // Số file hiển thị trên badge nút "Nguồn" (mobile)
   $('src-toggle').dataset.n = arr.length;
 
@@ -308,6 +352,17 @@ function renderFiles() {
     x.setAttribute('aria-label', 'Xóa ' + f.name);
     x.onclick = () => {
       f.abort && f.abort();        // Hủy upload nếu đang chạy
+
+      // Chỉ gọi xóa trên backend nếu file đã có serverId (tức đã upload xong thật sự).
+      // Chạy nền, không chặn UI: xóa khỏi danh sách ngay cho mượt, nếu backend từ chối
+      // thì báo lại bằng toast — không rollback lại vào danh sách để tránh nhấp nháy.
+      if (f.serverId) {
+        api.deleteFile(f.serverId).catch(e => {
+          console.error('[App] delete error', e);
+          toast('Không xóa được "' + f.name + '" trên máy chủ (vẫn ẩn khỏi danh sách ở đây).', 'warn');
+        });
+      }
+
       state.files.delete(f.id);    // Xóa khỏi Map
       renderFiles();               // Render lại
     };
@@ -326,26 +381,72 @@ $('select-all').onchange = e => {
   renderFiles();
 };
 
-// Cập nhật khu vực composer: chip ngữ cảnh + nút Gửi/Dừng
+/* -----------------------------------------------------------------------
+ * NÚT "XÓA (n) MỤC ĐÃ CHỌN" — cùng cơ chế xác nhận 2 bước với nút xóa hội thoại
+ * -------------------------------------------------------------------- */
+let bulkDelTimer = null;
+
+const disarmBulkDelete = () => {
+  clearTimeout(bulkDelTimer);
+  const b = $('bulk-del-btn');
+  if (b.classList.contains('armed')) {
+    b.classList.remove('armed');
+    const sel = readyFiles().filter(f => f.selected).length;
+    $('bulk-del-label').textContent = 'Xóa (' + sel + ')';
+  }
+};
+
+$('bulk-del-btn').onclick = () => {
+  const b = $('bulk-del-btn');
+  const targets = readyFiles().filter(f => f.selected);
+  if (!targets.length) return;
+
+  // Lần 1: chuyển sang trạng thái "armed" (chờ xác nhận), tự hủy sau 3s
+  if (!b.classList.contains('armed')) {
+    b.classList.add('armed');
+    $('bulk-del-label').textContent = 'Xóa thật?';
+    b.setAttribute('aria-label', 'Bấm lần nữa để xóa ' + targets.length + ' tài liệu đã chọn');
+    bulkDelTimer = setTimeout(disarmBulkDelete, 3000);
+    return;
+  }
+
+  // Lần 2: XÓA THẬT — cùng nguyên tắc với nút X: chạy nền, không chặn UI.
+  clearTimeout(bulkDelTimer);
+  targets.forEach(f => {
+    f.abort && f.abort();
+    if (f.serverId) {
+      api.deleteFile(f.serverId).catch(e => console.error('[App] bulk delete error', e));
+    }
+    state.files.delete(f.id);
+  });
+  renderFiles();
+  toast('Đã xóa ' + targets.length + ' tài liệu.', 'ok');
+};
+
+// Cập nhật khu vực composer: badge trên icon đính kèm + nút Gửi/Dừng
+// (Trước đây có chip text "3/5 tài liệu của bạn" ngay trong ô nhập — đã bỏ để composer
+// gọn hơn; trạng thái phạm vi giờ chỉ còn 1 badge số nhỏ trên icon đính kèm, chi tiết đầy
+// đủ vẫn xem ở panel "Nguồn" bên trái.)
 function updateComposer() {
   const rd = readyFiles();
   const sel = rd.filter(f => f.selected).length;
-  const ctx = $('ctx');
+  const badge = $('attach-badge');
+  const btn = $('attach-btn');
 
-  // Logic chọn icon + text hiển thị:
-  // - Nếu đang upload → "Đang xử lý tài liệu…"
-  // - Nếu không chọn file → "Kho dữ liệu chung"
-  // - Nếu có chọn → "3/5 tài liệu của bạn"
-  const [icon, text] = isBusy()
-    ? ['file-text', 'Đang xử lý tài liệu…']
-    : !sel
-      ? ['book', 'Kho dữ liệu chung']
-      : ['file-text', `${sel}/${rd.length} tài liệu của bạn`];
+  if (sel > 0) {
+    badge.hidden = false;
+    badge.textContent = sel > 99 ? '99+' : sel;
+  } else {
+    badge.hidden = true;
+  }
 
-  ctx.innerHTML = ico(icon);
-  const sp = document.createElement('span');
-  sp.textContent = text;
-  ctx.appendChild(sp);
+  // aria-label mô tả đầy đủ phạm vi hiện tại — để không mất thông tin với screen reader
+  // dù phần hiển thị bằng mắt chỉ còn 1 con số nhỏ trên badge.
+  const scopeDesc = isBusy()
+    ? 'đang xử lý tài liệu'
+    : !sel ? 'đang tìm trong kho dữ liệu chung' : `đang giới hạn trong ${sel}/${rd.length} tài liệu đã chọn`;
+  btn.setAttribute('aria-label', `Thêm file PDF (${scopeDesc})`);
+  btn.title = 'Thêm file PDF — ' + scopeDesc;
 
   syncSend();
 }
