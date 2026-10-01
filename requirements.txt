@@ -1,0 +1,10 @@
+!pip install llama-index
+!pip install llama-index-readers-web
+!pip install llama-index-embeddings-huggingface
+!pip install pypdf html2text beautifulsoup4
+!pip install llama-index-readers-file
+!pip install llama-index-llms-ollama
+!pip install llama-index-retrievers-bm25
+!pip install sentence-transformers rank-bm25
+!pip install unstructured-inference
+!pip install docling

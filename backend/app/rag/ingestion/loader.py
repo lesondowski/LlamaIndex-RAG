@@ -4,87 +4,72 @@ from unstructured.partition.pdf import partition_pdf
 from datetime import datetime, timezone
 import pymupdf
 import re
+import pymupdf4llm
 
 
 
 class PDFLoader:
-
-    def load(self, file_path: str, chapter: str | None = None) -> list:
+    def load(self, file_path: str) -> list[Document]:
         path = Path(file_path)
 
         if not path.is_file():
             raise FileNotFoundError(path)
 
         if path.suffix.lower() != ".pdf":
-            raise ValueError("--Hệ thống chỉ tiếp nhận file pdf--")
+            raise ValueError("Hệ thống chỉ tiếp nhận file PDF.")
 
-        elements = partition_pdf(
-            filename=str(path),
-            strategy="fast", # xử lý nhiều cột, nếu cài Tesseract OCR thì dùng auto hoặc hi_res
-            infer_table_structure=True
+        page_chunks = pymupdf4llm.to_markdown(
+            str(path),
+            page_chunks=True,
+            show_progress=False,
         )
 
-        documents = []
+        documents: list[Document] = []
 
+        for index, page_chunk in enumerate(page_chunks, start=1):
+            page_metadata = page_chunk.get("metadata", {})
+            page_number = page_metadata.get("page", index)
+            markdown = (page_chunk.get("text") or "").strip()
 
-        for idx, element in enumerate(elements):
-            
-            
-            category = type(element).__name__
-            if category in ["Header", "Footer"]: continue
-            if category not in ["Title", "NarrativeText", "Text", "ListItem", "Table"]: continue
+            if not markdown:
+                continue
 
-            
-            
-            text = (element.text or "").strip()
-
-            if not text: continue
-
-            metadata = {
-                "file_name": path.name,
-                "document_type": "pdf",
-                "element_type": category,
-                "element_id": idx,
-                "page": getattr(element.metadata, "page_number", None),
-                "ingested_at":  datetime.now(timezone.utc).isoformat()
-            }
-
-            if category == "Table":
-                text_as_html = getattr(element.metadata, "text_as_html", None)
-                if text_as_html:
-                    metadata["text_as_html"] = text_as_html
-
-            documents.append(Document(text=text, metadata=metadata))
+            documents.append(
+                Document(
+                    text=markdown,
+                    metadata={
+                        "file_name": path.name,
+                        "source": str(path.resolve()),
+                        "document_type": "pdf",
+                        "parser": "pymupdf4llm",
+                        "page": page_number,
+                        "page_count": len(page_chunks),
+                    },
+                )
+            )
 
         return documents
 
-    def PDFtoMarkdown(self,documents:list[Document], output_file:str):
-        markdown =[]
-        current_page=None
+    def PDFtoMarkdown(
+        self,
+        documents: list[Document],
+        output_file: str,
+    ) -> None:
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        for doc in documents:
-                page = doc.metadata.get("page")
-                category = doc.metadata.get("element_type")
+        markdown_pages: list[str] = []
 
-                if page != current_page:
+        for document in documents:
+            page = document.metadata.get("page", "")
+            markdown_pages.append(
+                f"<!-- Page {page} -->\n\n{document.text.strip()}"
+            )
 
-                    markdown.append(f"\n\n# Page {page}\n")
-                    current_page=page
-
-                if category=="Title":
-                    markdown.append(f"\n## {doc.text}\n")
-                elif category=="ListItem":
-                    markdown.append(f"- {doc.text}")
-                elif category=="Table":
-                    markdown.append(f"""```table{doc.text}""")
-                else:
-                    markdown.append(doc.text)
-
-        content="\n\n".join(markdown)
-        with open(output_file,"w",encoding="utf-8") as f:
-            f.write(content)
-
-
+        output_path.write_text(
+            "\n\n".join(markdown_pages),
+            encoding="utf-8",
+        )
 
     def split_double_page_spread(self, input_pdf: str, output_pdf: str, ratio_threshold: float = 1.25): 
         """

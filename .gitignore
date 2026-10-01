@@ -1,5 +1,6 @@
 # document private files
 document/
+document.md
 
 # Python
 __pycache__/
