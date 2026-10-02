@@ -1,0 +1,112 @@
+"""
+vector_store.py — Khởi tạo Chroma (chạy nhúng, KHÔNG cần service riêng như
+Qdrant) và bọc thành ChromaVectorStore để llama_index dùng được.
+
+Lưu ý vận hành: PersistentClient KHÔNG an toàn khi nhiều process cùng ghi 1 thư mục
+→ chạy uvicorn với đúng 1 worker.
+"""
+import logging
+from functools import lru_cache
+
+import chromadb
+from llama_index.core import StorageContext
+from llama_index.vector_stores.chroma import ChromaVectorStore
+
+from app.config import BASE_DIR
+from app.rag.indexing.embeddings import embed_model_id
+
+log = logging.getLogger(__name__)
+
+# Nằm cạnh storage/uploads/ — đúng quy ước "mọi artifact runtime nằm dưới
+# storage/" đã thống nhất; không đặt trong database/ (chỗ đó dành cho
+# connection.py tới DB quan hệ, không phải vector data).
+CHROMA_DIR = BASE_DIR / "storage" / "chroma_db"
+CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+
+# 1 collection cho mọi báo cáo tài chính. Nếu sau này cần tách loại tài liệu,
+# tạo collection khác tên — không trộn nhiều loại filter logic vào 1 collection.
+COLLECTION_NAME = "financial_reports"
+
+
+class EmbeddingModelMismatchError(RuntimeError):
+    """Collection đã lưu vector của model embedding khác với model hiện tại."""
+
+
+@lru_cache(maxsize=1)
+def _get_client() -> chromadb.ClientAPI:
+    # PersistentClient: tự lưu xuống đĩa, sống qua các lần restart server —
+    # khác EphemeralClient (chỉ ở RAM, chỉ nên dùng cho test).
+    # Cache lại: đúng 1 client cho cả process, tránh mở nhiều connection cùng lúc
+    # tới cùng 1 thư mục SQLite (Chroma dùng SQLite làm metadata store bên dưới).
+    return chromadb.PersistentClient(path=str(CHROMA_DIR))
+
+
+@lru_cache(maxsize=1)
+def get_collection():
+    """Lấy (hoặc tạo) collection và kiểm tra dấu vân tay model embedding.
+
+    - hnsw:space=cosine: độ đo khoảng cách chọn LÚC TẠO, không đổi được sau đó;
+      mặc định của Chroma là L2. Collection tạo từ trước vẫn là L2 → muốn cosine
+      phải xóa storage/chroma_db và index lại.
+    - embed_model: lệch model → dừng ngay, thay vì âm thầm trộn hai không gian vector.
+    """
+    model_id = embed_model_id()
+    collection = _get_client().get_or_create_collection(
+        COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine", "embed_model": model_id},
+    )
+    stored = (collection.metadata or {}).get("embed_model")
+    if stored is None:
+        log.warning(
+            "Collection '%s' tạo trước khi có dấu vân tay model nên không kiểm tra được; "
+            "nên xóa storage/chroma_db và index lại.", COLLECTION_NAME,
+        )
+    elif stored != model_id:
+        raise EmbeddingModelMismatchError(
+            f"Collection '{COLLECTION_NAME}' được index bằng '{stored}' nhưng cấu hình "
+            f"hiện tại là '{model_id}'. Đổi lại cấu hình, hoặc xóa storage/chroma_db "
+            f"và index lại toàn bộ tài liệu."
+        )
+    return collection
+
+
+def get_vector_store() -> ChromaVectorStore:
+    """Hàm DUY NHẤT index_manager.py nên gọi để lấy vector store."""
+    return ChromaVectorStore(chroma_collection=get_collection())
+
+
+def get_storage_context() -> StorageContext:
+    return StorageContext.from_defaults(vector_store=get_vector_store())
+
+
+def count_vectors() -> int:
+    """Tiện ích debug: đếm số vector hiện có — xác nhận ingest chạy đúng
+    mà không cần mở Chroma UI riêng."""
+    return get_collection().count()
+
+
+def count_by_file_id(file_id: str) -> int:
+    return len(get_collection().get(where={"file_id": file_id}, include=[])["ids"])
+
+
+def delete_by_file_id(file_id: str) -> int:
+    """Xóa mọi chunk của file_id bằng API native của Chroma. Trả về số chunk đã xóa.
+    (ChromaVectorStore.delete() của llama_index chỉ nhận ref_doc_id, không nhận filter.)"""
+    n = count_by_file_id(file_id)
+    if n:
+        get_collection().delete(where={"file_id": file_id})
+    return n
+
+
+def list_file_ids(page_size: int = 1000) -> set[str]:
+    """Tập file_id đang có trong index — để phát hiện chunk mồ côi."""
+    collection = get_collection()
+    found: set[str] = set()
+    offset = 0
+    while True:
+        batch = collection.get(include=["metadatas"], limit=page_size, offset=offset)
+        metas = batch["metadatas"] or []
+        if not metas:
+            return found
+        found.update(m["file_id"] for m in metas if m and "file_id" in m)
+        offset += len(metas)
