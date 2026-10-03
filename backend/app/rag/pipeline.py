@@ -1,31 +1,47 @@
-from app.rag.ingestion.loader import PDFLoader
-from app.rag.ingestion.chunker import Chunking
+import os
+import json
 from pathlib import Path
+from time import perf_counter
+from dotenv import load_dotenv
+from app.rag.indexing.index_manager import get_index_manager
+from app.rag.indexing.embeddings import get_embed_model
+
+backend_dir = Path(__file__).resolve().parents[2]
+project_dir = backend_dir.parent
+
+def main() -> None:
+    load_dotenv(project_dir / ".env")
+
+    nodes_path = (
+        backend_dir
+        / "app"
+        / "database"
+        / "data"
+        / "nodes"
+        / "nodes_1.json"
+    )
+
+    if not nodes_path.is_file():
+        raise FileNotFoundError(f"Không tìm thấy file nodes: {nodes_path}")
+
+    nodes = json.loads(nodes_path.read_text(encoding="utf-8"))
+    texts = [
+        item["text"].strip()
+        for item in nodes
+        if item.get("text", "").strip()
+    ][:3]
+
+    if not texts:
+        raise RuntimeError("JSON không có node nào chứa text.")
+
+    embed_model = get_embed_model()
+    vectors = embed_model.get_text_embedding_batch(texts)
+
+    print(f"Số chunk đã thử: {len(vectors)}")
+    print(f"Số chiều vector: {len(vectors[0])}")
+    print("Embedding Gemini hoạt động.")
 
 
 
-def main():
-    BASE_DIR = Path(__file__).resolve().parents[2]
-
-    PDF_PATH = BASE_DIR / "app/database/data/pdf/1.pdf" 
-    MD_PATH = BASE_DIR / "app/database/data/markdown/1.md" 
-    NODES_PATH = BASE_DIR / "app/database/data/nodes/nodes_1.json"
-
-
-    loader = PDFLoader()
-    documents = loader.load( str(PDF_PATH), document_id=PDF_PATH.stem, )
-
-
-    loader.PDFtoMarkdown( documents, str(MD_PATH), )
-
-
-    nodes = Chunking( output_file=NODES_PATH, chunk_size=550, chunk_overlap=64, ).run(documents)
-
-    print(f"Documents: {len(documents)}")
-    print(f"Nodes: {len(nodes)}")
-    print(f"Markdown: {MD_PATH}")
-    print(f"Nodes JSON: {NODES_PATH}")
-
-if __name__ ==  "__main__":
+if __name__ == "__main__":
     main()
-

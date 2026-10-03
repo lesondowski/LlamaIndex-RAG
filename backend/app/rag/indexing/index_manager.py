@@ -149,6 +149,12 @@ class IndexManager:
 
         self._ensure_ready()
 
+        for node in nodes:
+            if node.metadata.get("page") is None:
+                raise IndexingError(
+                    "Node thiếu page metadata; không thể bảo đảm citation."
+                )
+
         # Gắn metadata trước khi chèn — để (a) filter theo file_ids lúc chat,
         # (b) hiển thị đúng tên + trang trong panel trích dẫn.
         for i, node in enumerate(nodes):

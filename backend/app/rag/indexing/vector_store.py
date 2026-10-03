@@ -55,17 +55,23 @@ def get_collection():
         COLLECTION_NAME,
         metadata={"hnsw:space": "cosine", "embed_model": model_id},
     )
-    stored = (collection.metadata or {}).get("embed_model")
-    if stored is None:
-        log.warning(
-            "Collection '%s' tạo trước khi có dấu vân tay model nên không kiểm tra được; "
-            "nên xóa storage/chroma_db và index lại.", COLLECTION_NAME,
-        )
-    elif stored != model_id:
+    metadata = collection.metadata or {}
+    stored_model_id = metadata.get("embed_model")
+    stored_distance = metadata.get("hnsw:space")
+    if stored_model_id is None:
+            if collection.count() > 0:
+                raise EmbeddingModelMismatchError(f"Collection {COLLECTION_NAME!r} đã có vector nhưng không có embedding fingerprint")
+            
+            raise EmbeddingModelMismatchError(f"Collection {COLLECTION_NAME!r} chưa có metadata cấu hình. ")
+
+    if stored_model_id != model_id:
         raise EmbeddingModelMismatchError(
-            f"Collection '{COLLECTION_NAME}' được index bằng '{stored}' nhưng cấu hình "
-            f"hiện tại là '{model_id}'. Đổi lại cấu hình, hoặc xóa storage/chroma_db "
-            f"và index lại toàn bộ tài liệu."
+            f"Collection đang dùng {stored_model_id!r}, còn cấu hình hiện tại là {model_id!r} Cần dùng lại model cũ hoặc rebuild index.")
+
+    if stored_distance != "cosine":
+        raise EmbeddingModelMismatchError(
+            f"Collection đang dùng distance {stored_distance!r}, không phải "
+            "'cosine'. Cần tạo collection mới và index lại."
         )
     return collection
 
