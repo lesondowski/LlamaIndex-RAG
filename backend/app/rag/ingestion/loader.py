@@ -9,7 +9,7 @@ import pymupdf4llm
 
 
 class PDFLoader:
-    def load(self, file_path: str) -> list[Document]:
+    def load(self, file_path: str, document_id: str | None = None) -> list[Document]:
         path = Path(file_path)
 
         if not path.is_file():
@@ -23,7 +23,7 @@ class PDFLoader:
             page_chunks=True,
             show_progress=False,
         )
-
+        resolved_document_id = document_id or path.stem # Thêm document ID vào metadata
         documents: list[Document] = []
 
         for index, page_chunk in enumerate(page_chunks, start=1):
@@ -38,6 +38,7 @@ class PDFLoader:
                 Document(
                     text=markdown,
                     metadata={
+                        "document_id": resolved_document_id,
                         "file_name": path.name,
                         "source": str(path.resolve()),
                         "document_type": "pdf",

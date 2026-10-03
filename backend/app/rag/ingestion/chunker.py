@@ -1,31 +1,20 @@
 from pathlib import Path
 import json
+from collections.abc import Sequence
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser,SentenceSplitter
 
-
-
-
-
 class Chunking:
     
-    def __init__(
-        self,
-        markdown_file: str | Path,
+    def __init__( self,
         output_file: str | Path,
-        chunk_size: int = 550,
-        chunk_overlap: int = 64,
+        chunk_size: int = 550, # chunk_size này không phải là đơn vị ký tự, lưu ý đây là token chứ không phai ký tự
+        chunk_overlap: int = 64, # Mức độ chồng nhau của các câu, set vừa đủ để k bị mất ngữ cảnh
     ) -> None:
-        self.markdown_file = Path(markdown_file)
+        
         self.output_file = Path(output_file)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-
-    def load_markdown(self) -> str:
-        if not self.markdown_file.is_file():
-            raise FileNotFoundError(self.markdown_file)
-
-        return self.markdown_file.read_text(encoding="utf-8")
 
 
     def create_document(self, markdown: str) -> Document:
@@ -40,10 +29,29 @@ class Chunking:
         )
 
         return doc
-    def chunk(self):
-        doc = self.create_document(self.load_markdown())
+    def chunk(self, doucuments: Sequence[Document]):
+        
+        # kiểm tra và loại bỏ các text rỗng trong document
+        page_documents = [
+            document 
+            for document in doucuments 
+            if document.text and document.text.strip()
+            ]
 
-        sections = MarkdownNodeParser().get_nodes_from_documents([doc]) # chia theo heading
+        if not page_documents:
+            return []
+        key_metadata = ["document_id", "source", "file_name"]
+        for document in page_documents:
+            metadata = document.metadata
+            for key in key_metadata:
+                if not metadata.get(key):
+                    raise ValueError(f"Document thiếu metadata - Key: {key}")
+            if metadata.get("page") is None:
+                    raise ValueError(f"Document thiếu metadata - page")
+
+
+        #Như cũ      
+        sections = MarkdownNodeParser().get_nodes_from_documents(page_documents) # chia theo heading
 
         splitter = SentenceSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         chunks = []
@@ -83,9 +91,8 @@ class Chunking:
 
 
 
-    def run(self) -> list:
-        nodes = self.chunk()
-
+    def run(self, documents: Sequence[Document]) -> list:
+        nodes = self.chunk(documents)
         self.save(nodes)
 
         return nodes
