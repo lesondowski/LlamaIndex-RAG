@@ -1,15 +1,80 @@
-from pathlib import Path
-from llama_index.core import SimpleDirectoryReader, Document
-from unstructured.partition.pdf import partition_pdf
-from datetime import datetime, timezone
+import os
 import pymupdf
-import re
 import pymupdf4llm
+from pathlib import Path
+from dotenv import load_dotenv
+from typing import Any
+from collections import defaultdict
+from llama_index.core import Document
+from unstructured.partition.pdf import partition_pdf
+from llama_index.readers.llama_parse import LlamaParse
 
-
+load_dotenv() # nhớ setup api key
 
 class PDFLoader:
-    def load(self, file_path: str, document_id: str | None = None) -> list[Document]:
+    def load_partition_pdf(
+        self,
+        file_path: str,
+        document_id: str | None = None,
+    ) -> list[Document]:
+        path = self._validate_pdf_path(file_path)
+        resolved_document_id = document_id or path.stem
+
+        elements = partition_pdf(
+            filename=str(path),
+            strategy="ocr_only",
+            languages=["vie"],
+        )
+
+        pages: dict[int, list[str]] = defaultdict(list)
+        page_element_types: dict[int, list[str]] = defaultdict(list)
+
+        for element in elements:
+            text = str(element).strip()
+
+            if not text:
+                continue
+
+            page_number = self._get_page_number(element)
+            element_type = self._get_element_type(element)
+
+            pages[page_number].append(
+                f"[{element_type}]\n{text}"
+            )
+            page_element_types[page_number].append(element_type)
+
+        documents: list[Document] = []
+
+        for page_number in sorted(pages):
+            page_text = "\n\n".join(pages[page_number]).strip()
+
+            if not page_text:
+                continue
+
+            documents.append(
+                Document(
+                    text=page_text,
+                    metadata={
+                        "document_id": resolved_document_id,
+                        "doc_id": resolved_document_id,
+                        "file_name": path.name,
+                        "source": str(path.resolve()),
+                        "document_type": "pdf",
+                        "source_type": "pdf",
+                        "parser": "unstructured.partition_pdf",
+                        "scan": True,
+                        "ocr": True,
+                        "page": page_number,
+                        "element_types": sorted(
+                            set(page_element_types[page_number])
+                        ),
+                    },
+                )
+            )
+
+        return documents
+
+    def _validate_pdf_path(self, file_path: str) -> Path:
         path = Path(file_path)
 
         if not path.is_file():
@@ -18,38 +83,28 @@ class PDFLoader:
         if path.suffix.lower() != ".pdf":
             raise ValueError("Hệ thống chỉ tiếp nhận file PDF.")
 
-        page_chunks = pymupdf4llm.to_markdown(
-            str(path),
-            page_chunks=True,
-            show_progress=False,
-        )
-        resolved_document_id = document_id or path.stem # Thêm document ID vào metadata
-        documents: list[Document] = []
+        return path
 
-        for index, page_chunk in enumerate(page_chunks, start=1):
-            page_metadata = page_chunk.get("metadata", {})
-            page_number = page_metadata.get("page", index)
-            markdown = (page_chunk.get("text") or "").strip()
+    def _get_page_number(self, element: Any) -> int:
+        metadata = getattr(element, "metadata", None)
 
-            if not markdown:
-                continue
+        if metadata is None:
+            return 1
 
-            documents.append(
-                Document(
-                    text=markdown,
-                    metadata={
-                        "document_id": resolved_document_id,
-                        "file_name": path.name,
-                        "source": str(path.resolve()),
-                        "document_type": "pdf",
-                        "parser": "pymupdf4llm",
-                        "page": page_number,
-                        "page_count": len(page_chunks),
-                    },
-                )
-            )
+        page_number = getattr(metadata, "page_number", 1)
 
-        return documents
+        try:
+            return int(page_number)
+        except (TypeError, ValueError):
+            return 1
+
+    def _get_element_type(self, element: Any) -> str:
+        category = getattr(element, "category", None)
+
+        if category:
+            return str(category)
+
+        return element.__class__.__name__
 
     def PDFtoMarkdown(
         self,
@@ -120,3 +175,66 @@ class PDFLoader:
         dst.close()
         src.close()
         return page_map
+
+
+    def load_llama_parse(self,path_pdf: str, markdown_output: str,document_id: str | None = None,) -> list[Document]:
+        """
+        path_pdf: Name pdf data,
+        markdown_output: neu khong viet vao md. tu document ra thang chunking va nodes
+        """
+        api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+
+        if not api_key:
+            raise ValueError( "Chưa setup API KEY LLAMAINDEX.")
+    
+        path = self._validate_pdf_path(path_pdf)
+        resolved_document_id = (document_id or path.stem)
+
+        reader = LlamaParse(api_key=api_key,result_type="markdown",verbose=True,)
+
+        parsed_documents = reader.load_data(str(path))
+
+        if markdown_output is not None:
+            output_path = Path(markdown_output)
+            output_path.parent.mkdir(parents=True,exist_ok=True,)
+            markdown_text = "\n\n---\n\n".join(
+                doc.text.strip()
+                for doc in parsed_documents
+                if doc.text
+                and doc.text.strip()
+            )
+            output_path.write_text(markdown_text,encoding="utf-8",)
+
+        final_documents: list[Document] = []
+
+        for index, doc in enumerate(parsed_documents,start=1,):
+            if not doc.text:
+                continue
+            metadata = dict(getattr(doc,"metadata",{},) or {})
+
+            # Ưu tiên page metadata từ LlamaParse
+            page = (
+                metadata.get("page")
+                or metadata.get("page_number")
+                or index
+            )
+
+            final_documents.append(
+                Document(
+                    text=doc.text,
+                    metadata={
+                        "document_id": (resolved_document_id),
+                        "doc_id": (resolved_document_id),
+                        "file_name": path.name,
+                        "source": str(path.resolve()),
+                        "document_type": "pdf",
+                        "source_type": "pdf",
+                        "parser": "llamacloud",
+                        "parser_strategy": "markdown",
+                        "page": page,
+                    },
+                )
+            )
+
+        return final_documents
+
