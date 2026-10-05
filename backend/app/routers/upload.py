@@ -1,17 +1,6 @@
-# ============================================================================
-# upload.py — Router quản lý tài liệu: tải lên, liệt kê, xóa
-#
-# Mỗi tài liệu được lưu thành hai file cạnh nhau trong UPLOAD_DIR:
-#   <file_id>.pdf    nội dung PDF gốc
-#   <file_id>.json   metadata hiển thị (tên gốc, dung lượng, thời điểm tải lên)
-# Lý do cần file metadata: tên file trên đĩa là file_id ngẫu nhiên, nên nếu không
-# lưu tên gốc thì sau khi tải lại trang sẽ không thể dựng lại danh sách "Nguồn".
-#
-# Endpoint:
-#   POST   /upload           nhận PDF, trả { file_id, name, size }
-#   GET    /files            liệt kê tài liệu đã tải lên
-#   DELETE /files/{file_id}  xóa tài liệu
-# ============================================================================
+### Viết lại api, ở chunker.py anh sẽ bỏ các parameter
+
+
 import json
 import logging
 import re
@@ -59,61 +48,89 @@ def _meta_path(file_id: str):
     return UPLOAD_DIR / f"{file_id}.json"
 
 
-def _build_nodes(elements, file_name: str):
-    """Gom element (đầu ra PDFLoader.load) theo TRANG rồi cắt chunk, giữ số trang.
+def _build_nodes(documents, file_id: str, file_name: str):
 
-    - Mỗi trang là 1 Document riêng → chunk nào cũng biết chắc nó thuộc trang nào
-      (cần cho panel trích dẫn). Đánh đổi: câu vắt qua 2 trang bị cắt ở ranh giới.
-    - Dùng SentenceSplitter, không qua MarkdownNodeParser: parser đó cắt ở mọi dòng '#',
-      mà unstructured hay gán Title cho nhiều dòng thường → ra nhiều chunk vài chục ký
-      tự, vô dụng khi retrieval. Node nhỏ được splitter giữ nguyên vẹn.
-    - Chunking (chunker.py) giữ nguyên cho luồng markdown/pipeline.py; chỉ dùng chung
-      hằng số CHUNK_SIZE/CHUNK_OVERLAP để hai luồng cùng cỡ chunk.
-    """
-    buckets = {}
-    for el in elements:
-        kind = el.metadata.get("element_type")
-        if kind == "Title":
-            text = f"## {el.text}"
-        elif kind == "ListItem":
-            text = f"- {el.text}"
-        elif kind == "Table":
-            text = f"```table\n{el.text}\n```"      # đóng fence đầy đủ
-        else:
-            text = el.text
-        buckets.setdefault(el.metadata.get("page"), []).append(text)
+    page_documents = []
 
-    pages = []
-    for page, parts in buckets.items():
-        meta = {"file_name": file_name, "document_type": "pdf"}
-        if page is not None:            # Chroma không nhận giá trị None trong metadata
-            meta["page"] = int(page)
-        pages.append(Document(text="\n\n".join(parts), metadata=meta))
+    for document in documents:
+        text = document.text.strip()
+        if not text:
+            continue
 
-    splitter = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
-                                paragraph_separator="\n\n")
-    nodes = [n for n in splitter.get_nodes_from_documents(pages)
-             if n.get_content(metadata_mode=MetadataMode.NONE).strip()]
-    for i, node in enumerate(nodes):
-        node.metadata["chunk_index"] = i
+        source_metadata = dict(document.metadata or {})
+        page = source_metadata.get("page")
+        if page is None:
+            raise ValueError(
+                "LlamaParse không trả page metadata; không thể tạo citation chính xác."
+            )
+
+        try:
+            page = int(page)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Page metadata không hợp lệ: {page!r}") from exc
+
+        page_documents.append(
+            Document(
+                text=text,
+                metadata={
+                    "document_id": file_id,
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "source": file_name,
+                    "source_path": str(source_metadata.get("source", "")),
+                    "document_type": "pdf",
+                    "parser": "llamacloud",
+                    "page": page,
+                },
+            )
+        )
+
+    if not page_documents:
+        return []
+
+    splitter = SentenceSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        paragraph_separator="\n\n",
+    )
+    nodes = splitter.get_nodes_from_documents(page_documents)
+
+    nodes = [
+        node for node in nodes
+        if node.text and node.text.strip()
+    ]
+    for index, node in enumerate(nodes):
+        node.metadata["chunk_index"] = index
+
     return nodes
 
 
 def _ingest(pdf_path, file_id: str, display_name: str) -> int:
-    """parse PDF -> chunk -> embedding -> vector store. ĐỒNG BỘ và nặng (parse + gọi API
-    embedding), nên route gọi nó qua run_in_threadpool. Trả về số chunk đã index."""
-    # Import lười: unstructured/pymupdf nặng, không nên làm chậm lúc khởi động server.
     from app.rag.ingestion.loader import PDFLoader
 
-    elements = PDFLoader().load(str(pdf_path))
-    if not elements:
+    documents = PDFLoader().load_llama_parse(
+        path_pdf=str(pdf_path),
+        markdown_output=None,
+        document_id=file_id,
+    )
+    if not documents:
         raise HTTPException(
             status_code=422,
-            detail="Không trích xuất được văn bản từ PDF. Nếu là bản scan, cần OCR "
-                   "(cài Tesseract và dùng strategy='auto'/'hi_res' trong PDFLoader).",
+            detail="LlamaParse không trích xuất được nội dung từ PDF.",
         )
-    nodes = _build_nodes(elements, display_name)
-    return get_index_manager().ingest_nodes(nodes, file_id=file_id, file_name=display_name)
+
+    nodes = _build_nodes(documents, file_id, display_name)
+    if not nodes:
+        raise HTTPException(
+            status_code=422,
+            detail="PDF không tạo được chunk có nội dung.",
+        )
+
+    return get_index_manager().ingest_nodes(
+        nodes,
+        file_id=file_id,
+        file_name=display_name,
+    )
 
 
 def _read_meta(file_id: str) -> dict:
