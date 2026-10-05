@@ -3,7 +3,8 @@ import json
 from collections.abc import Sequence
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser,SentenceSplitter
-
+CHUNK_SIZE = 550
+CHUNK_OVERLAP = 64
 class Chunking:
     
     def __init__( self,
@@ -15,41 +16,29 @@ class Chunking:
         self.output_file = Path(output_file)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+    def validate_documents(self, documents: Sequence[Document]):
+        valid_docs = [
+            document for document in documents
+            if document.text and document.text.strip()
+        ]
+        if not valid_docs:
+            return []
+        required_keys = ["document_id", "source", "file_name"]
+        for doc in valid_docs:
+            metadata = doc.metadata or {}
+            for key in required_keys:
+                if not metadata.get(key):
+                    raise ValueError(f"Document không có metadata - không có key bắt buộc{key}")
+            if metadata.get("page") is None:
+                raise ValueError("Document thiếu metadaata - Thiếu page")
 
-
-    def create_document(self, markdown: str) -> Document:
-
-        doc = Document(
-            text = markdown,
-            metadata = {
-                "source": str(self.markdown_file.resolve()),
-                "file_name": self.markdown_file.name,
-                "document_type": "PDF",
-            }
-        )
+        return valid_docs
 
         return doc
-    def chunk(self, doucuments: Sequence[Document]):
-        
-        # kiểm tra và loại bỏ các text rỗng trong document
-        page_documents = [
-            document 
-            for document in doucuments 
-            if document.text and document.text.strip()
-            ]
-
+    def chunk(self, documents: Sequence[Document]):
+        page_documents = self.validate_documents(documents)        
         if not page_documents:
             return []
-        key_metadata = ["document_id", "source", "file_name"]
-        for document in page_documents:
-            metadata = document.metadata
-            for key in key_metadata:
-                if not metadata.get(key):
-                    raise ValueError(f"Document thiếu metadata - Key: {key}")
-            if metadata.get("page") is None:
-                    raise ValueError(f"Document thiếu metadata - page")
-
-
         #Như cũ      
         sections = MarkdownNodeParser().get_nodes_from_documents(page_documents) # chia theo heading
 
@@ -57,19 +46,26 @@ class Chunking:
         chunks = []
 
         for section_index, section in enumerate(sections):
-            section_document = Document(text=section.text, metadata=dict(section.metadata))
+            section_meta = dict(section.metadata) if section.metadata else {}
+            section_document = Document(text=section.text, metadata=section_meta)
 
             section_chunks = splitter.get_nodes_from_documents([section_document])
 
             for chunk_index, node in enumerate(section_chunks):
-                node.metadata.update(
+                final_meta = dict(node.metadata) if node.metadata else {}
+                final_meta.update(
                     {
                         "section_index": section_index,
                         "chunk_index": chunk_index,
                         "content_type": "MD",
-                        "text_lenght_chars": len(node.text) 
+                        "text_lenght_chars": len(node.text),
+                        "source": final_meta.get("source", ""),
+                        "file_name": final_meta.get("file_name", ""),
+                        "document_id": final_meta.get("document_id", ""),
+                        "page": final_meta.get("page", None),
                     }
                 )
+                node.metadata = final_meta
                 chunks.append(node)
 
 
