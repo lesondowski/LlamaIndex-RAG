@@ -1,10 +1,20 @@
-!pip install llama-index
-!pip install llama-index-readers-web
-!pip install llama-index-embeddings-huggingface
-!pip install pypdf html2text beautifulsoup4
-!pip install llama-index-readers-file
-!pip install llama-index-llms-ollama
-!pip install llama-index-retrievers-bm25
-!pip install sentence-transformers rank-bm25
-!pip install unstructured-inference
-!pip install docling
+llama-index
+llama-index-readers-web
+llama-index-embeddings-huggingface
+pypdf html2text beautifulsoup4
+llama-index-readers-file
+llama-index-llms-ollama
+llama-index-retrievers-bm25
+sentence-transformers rank-bm25
+unstructured-inference
+docling
+unstructured[pdf]
+unstructured[local-inference]
+pytesseract
+pymupdf
+pdf2image
+opencv-python
+llama-index-core
+llama-index-readers-llama-parse
+llama-cloud
+python-dotenv
