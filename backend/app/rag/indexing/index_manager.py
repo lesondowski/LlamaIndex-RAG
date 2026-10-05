@@ -1,34 +1,7 @@
-"""
-index_manager.py — Lớp DUY NHẤT được phép thao tác với vector index.
-
-Mọi route (/upload, /query, /files) PHẢI gọi qua đây, KHÔNG tự import
-VectorStoreIndex / ChromaVectorStore trực tiếp — giữ nguyên tắc "1 lớp biết
-chi tiết hạ tầng", nhất quán với api.js ở phía frontend.
-
-Đặc điểm thiết kế
------------------
-- **Lazy init**: embed model chỉ được load ở lần đầu ingest/query. Xóa tài
-  liệu KHÔNG cần embed → chạy được kể cả khi thiếu API key hoặc offline.
-- **Thread-safe**: 1 lock bảo vệ quá trình init, 1 lock tuần tự hóa ghi/xóa
-  (Chroma nhúng không an toàn với nhiều writer đồng thời).
-- **Idempotent ingest**: node id tất định `<file_id>_<index>` + xóa chunk cũ
-  trước khi chèn → upload lại cùng file không nhân đôi dữ liệu.
-- **Rollback**: ingest lỗi giữa chừng thì xóa phần đã chèn, không để lại
-  tài liệu nửa vời trong index.
-
-Cách dùng
----------
-    from app.rag.indexing.index_manager import get_index_manager
-    mgr = get_index_manager()            # khuyến nghị
-    # hoặc tương thích code cũ:
-    from app.rag.indexing.index_manager import index_manager
-"""
 from __future__ import annotations
-
 import logging
 import threading
 from functools import lru_cache
-
 from llama_index.core import Settings, VectorStoreIndex
 from llama_index.core.schema import BaseNode
 from llama_index.core.vector_stores import (
@@ -41,12 +14,7 @@ from app.rag.indexing import vector_store as vs
 from app.rag.indexing.embeddings import get_embed_model
 
 log = logging.getLogger(__name__)
-
-# Số node embed mỗi lượt gọi API — tránh gửi 1 batch quá lớn (rate limit, timeout).
 INGEST_BATCH_SIZE = 64
-
-# Chỉ những metadata key này được hiển thị cho LLM khi sinh câu trả lời.
-# Các key khác (file_id, chunk_index, section_index, …) chỉ dùng để lọc/hiển thị.
 _LLM_VISIBLE_KEYS = ("file_name", "page")
 
 
@@ -55,18 +23,6 @@ class IndexingError(RuntimeError):
 
 
 class IndexManager:
-    """
-    Facade cho toàn bộ thao tác với vector index.
-
-    Instance được cache qua `get_index_manager()` — dùng lại cho mọi request,
-    không mở/đóng connection Chroma liên tục (tránh lock file SQLite).
-
-    Lazy init: bản thân `__init__` KHÔNG load embed model. Lần gọi đầu tiên
-    tới `ingest_nodes()` hoặc `query()` mới trigger việc load (qua
-    `_ensure_ready()`). `delete_by_file_id()` không cần embed nên luôn chạy
-    được ngay cả khi thiếu API key hoặc không có mạng.
-    """
-
     def __init__(self) -> None:
         # Các field của index — điền ở _ensure_ready().
         self._index: VectorStoreIndex | None = None
@@ -78,17 +34,7 @@ class IndexManager:
         # Lock tuần tự hóa thao tác ghi/xóa — Chroma embedded chỉ an toàn với 1 writer.
         self._write_lock = threading.Lock()
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
     def _ensure_ready(self) -> None:
-        """
-        Đảm bảo index đã sẵn sàng. Load embed model + tạo VectorStoreIndex ở
-        lần gọi đầu tiên. An toàn khi nhiều thread cùng gọi (double-check lock).
-
-        Chỉ ingest_nodes() và query() cần gọi hàm này. delete_by_file_id()
-        KHÔNG gọi — nhờ đó xóa tài liệu không phụ thuộc vào embed model.
-        """
         if self._index is not None:
             return
         with self._init_lock:
@@ -96,14 +42,8 @@ class IndexManager:
                 return
             log.info("Khởi tạo IndexManager: load embed model lần đầu…")
             embed = get_embed_model()
-
-            # Gán vào Settings TOÀN CỤC của LlamaIndex — thiếu bước này, một số
-            # thành phần nội bộ có thể fallback về OpenAI mặc định dù embeddings.py
-            # đã cấu hình provider khác (không crash, chỉ âm thầm sai).
             Settings.embed_model = embed
 
-            # from_vector_store: GẮN vào collection Chroma đã có sẵn (hoặc rỗng nếu
-            # lần đầu) — KHÔNG build lại từ đầu như from_documents().
             self._index = VectorStoreIndex.from_vector_store(
                 vs.get_vector_store(),
                 embed_model=embed,
@@ -113,11 +53,7 @@ class IndexManager:
 
     @staticmethod
     def _build_filters(file_ids: list[str] | None) -> MetadataFilters | None:
-        """
-        None/[] → không filter (tìm toàn bộ collection).
-        1 file → EQ.
-        Nhiều file → IN (một chunk chỉ cần khớp MỘT trong số đó).
-        """
+
         if not file_ids:
             return None
         if len(file_ids) == 1:
@@ -130,20 +66,6 @@ class IndexManager:
     # Public API
     # ------------------------------------------------------------------
     def ingest_nodes(self, nodes: list[BaseNode], file_id: str, file_name: str) -> int:
-        """
-        Thay thế TOÀN BỘ chunk của `file_id` bằng `nodes`.
-
-        Idempotent: xóa chunk cũ của file_id trước khi chèn → upload lại cùng
-        file không nhân đôi dữ liệu. Có rollback nếu lỗi giữa chừng.
-
-        Args:
-            nodes: danh sách TextNode từ bước chunking.
-            file_id: UUID của file PDF gốc (dùng để filter khi chat).
-            file_name: tên gốc hiển thị cho người dùng (citation).
-
-        Returns:
-            Số node đã index.
-        """
         if not nodes:
             raise IndexingError("Không có chunk nào để index.")
 
@@ -155,13 +77,10 @@ class IndexManager:
                     "Node thiếu page metadata; không thể bảo đảm citation."
                 )
 
-        # Gắn metadata trước khi chèn — để (a) filter theo file_ids lúc chat,
-        # (b) hiển thị đúng tên + trang trong panel trích dẫn.
         for i, node in enumerate(nodes):
             node.id_ = f"{file_id}_{i:05d}"           # id tất định → idempotent
             node.metadata["file_id"] = file_id
-            node.metadata["file_name"] = file_name
-            # Ghi đè 'source' (đường dẫn .md tuyệt đối) bằng tên gốc cho citation.
+            node.metadata["file_name"] = file_name  
             node.metadata["source"] = file_name
 
             # Loại metadata khỏi văn bản đem embed — tránh nhiễu vector.

@@ -59,11 +59,26 @@ def get_collection():
     stored_model_id = metadata.get("embed_model")
     stored_distance = metadata.get("hnsw:space")
     if stored_model_id is None:
-            if collection.count() > 0:
-                raise EmbeddingModelMismatchError(f"Collection {COLLECTION_NAME!r} đã có vector nhưng không có embedding fingerprint")
-            
-            raise EmbeddingModelMismatchError(f"Collection {COLLECTION_NAME!r} chưa có metadata cấu hình. ")
+        if collection.count() > 0:
+            raise EmbeddingModelMismatchError(
+                f"Collection {COLLECTION_NAME!r} đã có vector nhưng thiếu "
+                "embedding fingerprint; cần xác minh/rebuild thủ công."
+            )
 
+        if stored_distance not in (None, "cosine"):
+            raise EmbeddingModelMismatchError(
+                f"Collection rỗng nhưng distance là {stored_distance!r}; "
+                "hãy tạo collection mới để dùng cosine."
+            )
+
+        collection.modify(
+            metadata={"hnsw:space": "cosine", "embed_model": model_id}
+        )
+        metadata = collection.metadata or {}
+        stored_model_id = metadata.get("embed_model")
+        stored_distance = metadata.get("hnsw:space")
+
+        
     if stored_model_id != model_id:
         raise EmbeddingModelMismatchError(
             f"Collection đang dùng {stored_model_id!r}, còn cấu hình hiện tại là {model_id!r} Cần dùng lại model cũ hoặc rebuild index.")
