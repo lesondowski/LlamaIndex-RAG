@@ -1,11 +1,14 @@
 llama-index
 llama-index-readers-web
 llama-index-embeddings-huggingface
-pypdf html2text beautifulsoup4
+pypdf 
+html2text 
+beautifulsoup4
 llama-index-readers-file
 llama-index-llms-ollama
 llama-index-retrievers-bm25
-sentence-transformers rank-bm25
+sentence-transformers 
+rank-bm25
 unstructured-inference
 docling
 unstructured[pdf]
@@ -18,3 +21,4 @@ llama-index-core
 llama-index-readers-llama-parse
 llama-cloud
 python-dotenv
+chromadb
