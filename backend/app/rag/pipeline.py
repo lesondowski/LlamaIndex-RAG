@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from app.rag.ingestion.chunker import Chunking
 from app.rag.ingestion.loader import PDFLoader
 from app.rag.indexing.index_manager import get_index_manager
+from app.config import BASE_DIR
 
 def loading(input_pdf: str, output_markdown:str, file_id: str):
     print("-----    PARSE PDF WITH LLAMACLOUD   ------")
@@ -75,14 +76,14 @@ def retrieval(manager, file_id):
 def main() -> None:
     load_dotenv()
     #Setup Parameter
-    input_pdf = Path("./backend/app/database/data/pdf/2.pdf")
-    output_dir =  Path("./backend/app/database/storage/pipeline_runs")
+    input_pdf = BASE_DIR/"app"/"database"/"data"/"pdf"/"12-shs-vat-li-12.pdf"
+    output_dir =  BASE_DIR/"storage"/"pipeline_runs"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_markdown = (output_dir / f"{input_pdf.stem}.md")
     output_nodes = (output_dir / f"{input_pdf.stem}_nodes.json")
 
-    # ID ổn định để chạy lại pipeline sẽ thay index của lần chạy trước.
+    # ID ổn định để  hạy lại pipeline sẽ thay index của lần chạy trước.
     file_id = f"pipeline_{input_pdf.stem}"
 
 
