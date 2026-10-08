@@ -17,6 +17,8 @@ dependencies = [
     "llama-index-llms-openai",
     "unstructured",
     "pymupdf",
+    "llama-index-embeddings-google-genai",
+    "llama-index-llms-google-genai",
 ]
 
 [build-system]

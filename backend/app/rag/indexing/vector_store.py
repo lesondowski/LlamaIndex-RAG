@@ -25,7 +25,7 @@ CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
 # 1 collection cho mọi báo cáo tài chính. Nếu sau này cần tách loại tài liệu,
 # tạo collection khác tên — không trộn nhiều loại filter logic vào 1 collection.
-COLLECTION_NAME = "financial_reports"
+COLLECTION_NAME = "SGKCTST"
 
 
 class EmbeddingModelMismatchError(RuntimeError):
