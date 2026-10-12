@@ -75,7 +75,7 @@ def retrieval(manager, file_id):
 def main() -> None:
     load_dotenv()
     #Setup Parameter
-    input_pdf = Path("./app/database/data/pdf/ctst_vl12-1-70.pdf")
+    input_pdf = Path("./app/database/data/pdf/2.pdf")
     output_dir =  Path("./app/database/storage/pipeline_runs")
     output_dir.mkdir(parents=True, exist_ok=True)
 

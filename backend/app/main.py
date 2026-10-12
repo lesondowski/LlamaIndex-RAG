@@ -1,6 +1,10 @@
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
-from app.routers import upload
+from app.routers import upload, query
+
 
 # Khởi tạo ứng dụng. `title` hiển thị trong tài liệu tự sinh tại /docs (Swagger UI).
 app = FastAPI(title="Financial RAG")
@@ -14,9 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/health")
 def health():
     # Endpoint kiểm tra sống (liveness). api.js gọi checkHealth() vào đây để hiển
     # thị huy hiệu trạng thái kết nối; chỉ cần phản hồi được là coi như "đã kết nối".
     return {"status": "ok"}
 app.include_router(upload.router)
+app.include_router(query.router)

@@ -176,8 +176,7 @@ class PDFLoader:
         src.close()
         return page_map
 
-
-    def load_llama_parse(self,path_pdf: str, markdown_output: str,document_id: str | None = None,) -> list[Document]:
+    def load_llama_parse(self,path_pdf: str, markdown_output: str | Path | None = None ,document_id: str | None = None,) -> list[Document]:
         """
         Parse PDF bằng LlamaParse.
 
