@@ -29,7 +29,7 @@ def query_stream(request: QueryRequest) -> StreamingResponse:
                 }
             )
 
-            results = Retriever.retrieve(
+            results = Retriever().retrieve(
                 question= request.question,
                 top_k=request.top_k,
                 file_ids= request.file_ids
