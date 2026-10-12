@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.rag.generation.citations import build_citations
-from app.rag.generation.synthesizer import build_query_engine
+from app.rag.generation.synthesizer import build_grounded_response
 from app.rag.retrieval.retriever import Retriever
 from app.schemas import QueryRequest
 
@@ -29,15 +29,13 @@ def query_stream(request: QueryRequest) -> StreamingResponse:
                 }
             )
 
-            retriever = Retriever().as_llamaindex_retriever(
+            results = Retriever.retrieve(
+                question= request.question,
                 top_k=request.top_k,
-                file_ids=request.file_ids,
+                file_ids= request.file_ids
             )
-            query_engine = build_query_engine(retriever)
-            response = query_engine.query(request.question)
 
-            source_nodes = response.source_nodes or []
-            if not source_nodes:
+            if not results:
                 yield _sse(
                     {
                         "event": "not_found",
@@ -46,7 +44,7 @@ def query_stream(request: QueryRequest) -> StreamingResponse:
                 )
                 return
 
-            citations = build_citations(source_nodes)
+            citations = build_citations(results)
             yield _sse(
                 {
                     "event": "citations",
@@ -59,6 +57,7 @@ def query_stream(request: QueryRequest) -> StreamingResponse:
                     "message": "Đang tổng hợp câu trả lời...",
                 }
             )
+            response = build_grounded_response(question=request.question, results=results)
 
             for token in response.response_gen:
                 if token:

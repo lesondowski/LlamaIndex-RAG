@@ -1,5 +1,4 @@
 from llama_index.core.schema import NodeWithScore
-import json
 def build_citations(results: list[NodeWithScore]) -> list[dict]:
     citations = []
     for index, result in enumerate(results, start=1):
