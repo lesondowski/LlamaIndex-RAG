@@ -1,0 +1,20 @@
+llama-index
+llama-index-readers-web
+llama-index-embeddings-huggingface
+pypdf html2text beautifulsoup4
+llama-index-readers-file
+llama-index-llms-ollama
+llama-index-retrievers-bm25
+sentence-transformers rank-bm25
+unstructured-inference
+docling
+unstructured[pdf]
+unstructured[local-inference]
+pytesseract
+pymupdf
+pdf2image
+opencv-python
+llama-index-core
+llama-index-readers-llama-parse
+llama-cloud
+python-dotenv

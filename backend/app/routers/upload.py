@@ -1,18 +1,6 @@
-"""
-Router quản lý tài liệu: tải lên, liệt kê, xóa.
+### Viết lại api, ở chunker.py anh sẽ bỏ các parameter
 
-Mỗi tài liệu được lưu thành hai file cạnh nhau trong UPLOAD_DIR:
-  <file_id>.pdf    nội dung PDF gốc
-  <file_id>.json   metadata hiển thị (tên gốc, dung lượng, thời điểm tải lên)
 
-File metadata cần thiết vì tên file trên đĩa là file_id ngẫu nhiên — nếu không
-lưu tên gốc, danh sách "Nguồn" không dựng lại được sau khi tải lại trang.
-
-Endpoint:
-  POST   /upload           nhận PDF, trả { file_id, name, size, chunks }
-  GET    /files            liệt kê tài liệu đã tải lên
-  DELETE /files/{file_id}  xóa tài liệu
-"""
 import json
 import logging
 import re
@@ -23,95 +11,130 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from app.config import MAX_FILE_SIZE, UPLOAD_DIR
-from app.rag.indexing.index_manager import IndexingError, get_index_manager
-from app.rag.ingestion.chunker import CHUNK_OVERLAP, CHUNK_SIZE
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import MetadataMode
 
+from app.rag.indexing.index_manager import IndexingError, get_index_manager
+from app.rag.ingestion.chunker import CHUNK_OVERLAP, CHUNK_SIZE   # chỉ đọc hằng số, không sửa chunker.py
+
 log = logging.getLogger(__name__)
 
+# APIRouter gom các endpoint liên quan; main.py gắn router này vào app chính.
 router = APIRouter()
 
-# Đọc theo từng khối 1 MB để RAM không bao giờ nạp cả file. Đặt tên khác CHUNK_SIZE
-# vì tên đó đã bị chiếm bởi hằng số chunk văn bản import ở trên — dùng trùng tên sẽ
-# ghi đè giá trị và khiến SentenceSplitter nhận nhầm kích thước chunk khổng lồ.
+# Đọc theo từng khối 1 MB: RAM luôn ở mức ~1 MB thay vì nạp cả file vào bộ nhớ.
+# ĐẶT TÊN KHÁC CHUNK_SIZE: tên đó đã bị chiếm bởi hằng số chunk văn bản import ở trên
+# (app.rag.ingestion.chunker.CHUNK_SIZE, ~512 token). Dùng trùng tên từng khiến dòng này
+# ghi đè luôn giá trị đó — SentenceSplitter ở _build_nodes() nhận nhầm 1 048 576 làm
+# chunk_size, nghĩa là gần như không bao giờ cắt chunk (mỗi tài liệu dồn thành 1 chunk
+# khổng lồ). Đổi tên để 2 khái niệm — "cỡ buffer đọc file" và "cỡ 1 chunk văn bản" —
+# không bao giờ còn chung 1 biến.
 READ_CHUNK_BYTES = 1024 * 1024
 
-# file_id hợp lệ là 32 ký tự hex (uuid4().hex). Kiểm tra ở mọi endpoint nhận
-# file_id từ client là bắt buộc để ngăn path traversal khi ghép thành đường dẫn.
+# file_id hợp lệ là đúng 32 ký tự hex thường (kết quả của uuid4().hex).
+# Kiểm tra chặt giá trị này ở mọi endpoint nhận file_id từ client là bắt buộc:
+# nó ngăn path traversal (vd "../../config") khi ghép file_id thành đường dẫn.
 FILE_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 
 def _pdf_path(file_id: str):
+    """Đường dẫn file PDF của một tài liệu."""
     return UPLOAD_DIR / f"{file_id}.pdf"
 
 
 def _meta_path(file_id: str):
+    """Đường dẫn file metadata của một tài liệu."""
     return UPLOAD_DIR / f"{file_id}.json"
 
 
-def _build_nodes(elements, file_name: str):
-    """Gom element (đầu ra PDFLoader.load) theo trang rồi cắt chunk.
+def _build_nodes(documents, file_id: str, file_name: str):
 
-    Mỗi trang là một Document riêng để chunk nào cũng biết chắc nó thuộc trang
-    nào (cần cho panel trích dẫn). Dùng SentenceSplitter thay vì MarkdownNodeParser
-    vì parser sau cắt ở mọi dòng '#', mà unstructured gán Title cho nhiều dòng
-    thường → sinh nhiều chunk vài chục ký tự, vô dụng khi retrieval.
-    """
-    buckets: dict = {}
-    for el in elements:
-        kind = el.metadata.get("element_type")
-        if kind == "Title":
-            text = f"## {el.text}"
-        elif kind == "ListItem":
-            text = f"- {el.text}"
-        elif kind == "Table":
-            text = f"```table\n{el.text}\n```"
-        else:
-            text = el.text
-        buckets.setdefault(el.metadata.get("page"), []).append(text)
+    page_documents = []
 
-    pages = []
-    for page, parts in buckets.items():
-        meta = {"file_name": file_name, "document_type": "pdf"}
-        if page is not None:  # Chroma không nhận None trong metadata
-            meta["page"] = int(page)
-        pages.append(Document(text="\n\n".join(parts), metadata=meta))
+    for document in documents:
+        text = document.text.strip()
+        if not text:
+            continue
+
+        source_metadata = dict(document.metadata or {})
+        page = source_metadata.get("page")
+        if page is None:
+            raise ValueError(
+                "LlamaParse không trả page metadata; không thể tạo citation chính xác."
+            )
+
+        try:
+            page = int(page)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Page metadata không hợp lệ: {page!r}") from exc
+
+        page_documents.append(
+            Document(
+                text=text,
+                metadata={
+                    "document_id": file_id,
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "source": file_name,
+                    "source_path": str(source_metadata.get("source", "")),
+                    "document_type": "pdf",
+                    "parser": "llamacloud",
+                    "page": page,
+                },
+            )
+        )
+
+    if not page_documents:
+        return []
 
     splitter = SentenceSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
         paragraph_separator="\n\n",
     )
+    nodes = splitter.get_nodes_from_documents(page_documents)
+
     nodes = [
-        n for n in splitter.get_nodes_from_documents(pages)
-        if n.get_content(metadata_mode=MetadataMode.NONE).strip()
+        node for node in nodes
+        if node.text and node.text.strip()
     ]
-    for i, node in enumerate(nodes):
-        node.metadata["chunk_index"] = i
+    for index, node in enumerate(nodes):
+        node.metadata["chunk_index"] = index
+
     return nodes
 
 
 def _ingest(pdf_path, file_id: str, display_name: str) -> int:
-    """Parse PDF → chunk → embedding → vector store. Đồng bộ và nặng, route gọi
-    qua run_in_threadpool. Trả về số chunk đã index."""
-    # Import lười: unstructured/pymupdf nặng, không nên làm chậm lúc khởi động.
     from app.rag.ingestion.loader import PDFLoader
 
-    elements = PDFLoader().load(str(pdf_path))
-    if not elements:
+    documents = PDFLoader().load_llama_parse(
+        path_pdf=str(pdf_path),
+        markdown_output=None,
+        document_id=file_id,
+    )
+    if not documents:
         raise HTTPException(
             status_code=422,
-            detail="Không trích xuất được văn bản từ PDF. Nếu là bản scan, cần OCR "
-                   "(cài Tesseract và dùng strategy='auto'/'hi_res' trong PDFLoader).",
+            detail="LlamaParse không trích xuất được nội dung từ PDF.",
         )
-    nodes = _build_nodes(elements, display_name)
-    return get_index_manager().ingest_nodes(nodes, file_id=file_id, file_name=display_name)
+
+    nodes = _build_nodes(documents, file_id, display_name)
+    if not nodes:
+        raise HTTPException(
+            status_code=422,
+            detail="PDF không tạo được chunk có nội dung.",
+        )
+
+    return get_index_manager().ingest_nodes(
+        nodes,
+        file_id=file_id,
+        file_name=display_name,
+    )
 
 
 def _read_meta(file_id: str) -> dict:
-    """Đọc metadata; trả {} nếu thiếu hoặc hỏng để không làm hỏng cả danh sách."""
+    """Đọc metadata; trả về {} nếu thiếu hoặc hỏng để không làm hỏng cả danh sách."""
     try:
         data = json.loads(_meta_path(file_id).read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
@@ -119,54 +142,62 @@ def _read_meta(file_id: str) -> dict:
         return {}
 
 
+# ----------------------------------------------------------------------------
+# POST /upload
+# ----------------------------------------------------------------------------
 @router.post("/upload")
 async def upload_pdf(
-    # Tên tham số phải trùng key trong fd.append('file', ...) ở api.js,
-    # nếu khác FastAPI sẽ trả 422.
+    # Tên tham số `file` phải trùng key trong `fd.append('file', ...)` ở api.js,
+    # nếu khác tên FastAPI sẽ trả 422 (thiếu field bắt buộc).
     file: UploadFile = File(...),
 ):
-    # `or ""` xử lý trường hợp filename là None.
+    # `or ""` xử lý trường hợp filename là None, tránh AttributeError ở .lower().
     name = file.filename or ""
 
+    # Lớp kiểm tra 1: đuôi file. Chỉ là kiểm tra nhanh vì dễ bị giả mạo.
     if not name.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file PDF")
 
-    # Magic bytes: mọi file PDF hợp lệ đều bắt đầu bằng "%PDF-", không phụ thuộc
-    # vào tên file hay Content-Type do client tự khai báo.
+    # Lớp kiểm tra 2: magic bytes. Mọi file PDF hợp lệ đều bắt đầu bằng "%PDF-",
+    # không phụ thuộc vào tên file hay Content-Type do client tự khai báo.
     head = await file.read(5)
     if head != b"%PDF-":
         raise HTTPException(status_code=400, detail="File không phải PDF hợp lệ")
 
-    # Chỉ lấy phần tên file, bỏ mọi thư mục nếu client gửi cả đường dẫn. Giá trị
-    # này chỉ dùng để hiển thị, không bao giờ được dùng để ghép đường dẫn trên đĩa.
+    # Tên hiển thị: chỉ lấy phần tên file, bỏ mọi thư mục nếu client gửi cả đường dẫn
+    # (một số client gửi "C:\\thu-muc\\bao-cao.pdf"). Giá trị này chỉ dùng để hiển thị,
+    # không bao giờ được dùng để ghép đường dẫn trên đĩa.
     display_name = name.replace("\\", "/").rsplit("/", 1)[-1]
 
-    # file_id ngẫu nhiên làm định danh và tên file trên đĩa. Không dùng tên gốc
-    # vì hai người có thể upload file trùng tên (ghi đè nhau) và tên do client
-    # kiểm soát có thể chứa "../" (path traversal).
+    # file_id ngẫu nhiên làm định danh và tên file trên đĩa. Không dùng tên gốc vì hai
+    # người có thể tải lên file trùng tên (ghi đè nhau) và tên do client kiểm soát có
+    # thể chứa "../" (path traversal).
     file_id = uuid.uuid4().hex
     dest = _pdf_path(file_id)
     meta_file = _meta_path(file_id)
 
-    # Ghi vào ".part" rồi đổi tên ở cuối: GET /files không bao giờ thấy PDF ghi dở.
+    # Ghi vào file tạm ".part" rồi đổi tên ở cuối. Nhờ vậy GET /files (vd người dùng
+    # tải lại trang giữa lúc đang upload) không bao giờ thấy một PDF ghi dở.
     tmp = UPLOAD_DIR / f"{file_id}.part"
-    size = len(head)
+
+    size = len(head)   # đã đọc 5 byte đầu ở bước kiểm tra trên
 
     try:
         with tmp.open("wb") as out:
-            out.write(head)  # ghi lại 5 byte đã đọc ở bước kiểm tra magic bytes
+            out.write(head)   # ghi lại 5 byte đầu vì con trỏ đọc đã đi qua chúng
 
+            # Toán tử walrus `:=` vừa đọc vừa gán; dừng khi read() trả về bytes rỗng.
             while chunk := await file.read(READ_CHUNK_BYTES):
                 size += len(chunk)
 
-                # Kiểm tra trong lúc đọc để cắt ngay request quá khổ thay vì để
-                # nó chiếm hết đĩa rồi mới từ chối.
+                # Kiểm tra giới hạn TRONG lúc đọc để cắt ngay request quá khổ thay vì
+                # để nó chiếm hết đĩa rồi mới từ chối. 413 = Payload Too Large.
                 if size > MAX_FILE_SIZE:
                     raise HTTPException(status_code=413, detail="File vượt quá 50MB")
 
                 out.write(chunk)
 
-        # Ghi metadata trước khi "công bố" PDF, để bất kỳ PDF nào hiện ra trong
+        # Ghi metadata trước khi "công bố" file PDF, để bất kỳ PDF nào hiện ra trong
         # danh sách đều đã có đủ thông tin.
         meta = {
             "file_id": file_id,
@@ -176,22 +207,26 @@ async def upload_pdf(
         }
         meta_file.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
-        # replace() là đổi tên nguyên tử: từ đây PDF xuất hiện đầy đủ.
+        # replace() là thao tác đổi tên nguyên tử: từ thời điểm này PDF xuất hiện đầy đủ.
         tmp.replace(dest)
 
     except BaseException:
-        # Dùng BaseException (không phải Exception) vì khi client ngắt kết nối,
-        # asyncio ném CancelledError — vốn kế thừa BaseException.
+        # Dọn mọi file dở dang khi có sự cố: vượt dung lượng, lỗi đĩa, hoặc client hủy
+        # giữa chừng. Dùng BaseException (không phải Exception) vì khi client ngắt kết
+        # nối, asyncio ném CancelledError, vốn kế thừa BaseException.
         for leftover in (tmp, dest, meta_file):
             leftover.unlink(missing_ok=True)
-        raise
+        raise   # ném lại đúng lỗi gốc để FastAPI trả mã HTTP phù hợp
 
+    # Index: chỉ trả 200 khi tài liệu ĐÃ truy vấn được — khớp trạng thái 'processing' của
+    # UI (bật từ xhr.upload.onload cho tới khi có response). Metadata {file_id, file_name,
+    # page} gắn cho từng chunk để (a) lọc theo file_ids lúc chat, (b) hiển thị đúng tên
+    # nguồn và số trang trong panel trích dẫn.
     try:
         chunks = await run_in_threadpool(_ingest, dest, file_id, display_name)
     except BaseException as exc:
-        # Tài liệu không index được thì không được tồn tại: tránh PDF "ma" trong
-        # danh sách Nguồn nhưng không bao giờ trả lời được. ingest_nodes đã tự
-        # rollback vector.
+        # Tài liệu không index được thì không được tồn tại: tránh PDF "ma" trong danh
+        # sách Nguồn nhưng không bao giờ trả lời được. ingest_nodes đã tự rollback vector.
         for leftover in (dest, meta_file):
             leftover.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
@@ -202,21 +237,28 @@ async def upload_pdf(
         if isinstance(exc, Exception):
             log.exception("Lỗi không lường trước khi ingest %s", display_name)
             raise HTTPException(status_code=500, detail="Lỗi nội bộ khi xử lý tài liệu")
-        raise  # CancelledError
+        raise   # CancelledError (client hủy giữa chừng): ném lại nguyên trạng
 
+    # Khóa `file_id` được api.js đọc và lưu làm serverId; sau này frontend gửi lại
+    # giá trị này trong `file_ids` khi chat.
     return {"file_id": file_id, "name": display_name, "size": size, "chunks": chunks}
 
 
+# ----------------------------------------------------------------------------
+# GET /files
+# ----------------------------------------------------------------------------
 @router.get("/files")
 def list_files():
-    """Liệt kê tài liệu đã tải lên, cũ nhất trước.
+    """Liệt kê mọi tài liệu đã tải lên, cũ nhất trước (khớp thứ tự giao diện thêm vào).
 
-    Khai báo bằng def (không phải async def) để FastAPI chạy trong threadpool —
-    hàm đọc đĩa đồng bộ, không nên chặn event loop.
+    Khai báo bằng `def` (không phải `async def`) để FastAPI chạy hàm trong threadpool,
+    vì hàm này đọc đĩa đồng bộ và không nên chặn event loop.
     """
     items = []
     for pdf in UPLOAD_DIR.glob("*.pdf"):
         file_id = pdf.stem
+
+        # Bỏ qua file lạ do người dùng tự chép vào thư mục (tên không phải file_id).
         if not FILE_ID_RE.fullmatch(file_id):
             continue
 
@@ -224,27 +266,34 @@ def list_files():
         stat = pdf.stat()
         items.append({
             "file_id": file_id,
+            # Tài liệu tải lên trước khi có metadata sẽ không có tên gốc: dùng tên tạm.
             "name": meta.get("name") or f"{file_id[:8]}.pdf",
+            # Dung lượng lấy từ đĩa để luôn chính xác, bất kể metadata.
             "size": stat.st_size,
             "uploaded_at": meta.get("uploaded_at")
                            or datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
         })
 
-    # Chuỗi ISO-8601 cùng múi giờ UTC nên so sánh chuỗi cũng đúng thứ tự thời gian.
+    # Các chuỗi ISO-8601 cùng múi giờ UTC nên so sánh theo chuỗi cũng đúng thứ tự thời gian.
     items.sort(key=lambda item: item["uploaded_at"])
     return {"files": items}
 
 
+# ----------------------------------------------------------------------------
+# DELETE /files/{file_id}
+# ----------------------------------------------------------------------------
 @router.delete("/files/{file_id}", status_code=204)
 def delete_file(file_id: str):
-    """Xóa một tài liệu (PDF và metadata)."""
+    """Xóa một tài liệu (PDF và metadata). Trả 204 No Content khi thành công."""
+    # Chặn mọi giá trị không đúng dạng file_id trước khi ghép thành đường dẫn.
     if not FILE_ID_RE.fullmatch(file_id):
         raise HTTPException(status_code=400, detail="file_id không hợp lệ")
 
     pdf = _pdf_path(file_id)
 
-    # Xóa vector trước: nếu bước này lỗi, PDF vẫn còn nên người dùng thử xóa lại
-    # được. Làm ngược lại sẽ để chunk mồ côi vẫn bị truy xuất mà không còn cách xóa.
+    # Xóa vector TRƯỚC: nếu bước này lỗi, PDF vẫn còn nên người dùng thử xóa lại được
+    # (làm ngược lại sẽ để chunk mồ côi vẫn bị truy xuất mà không còn cách xóa). Cũng dọn
+    # được chunk mồ côi khi PDF đã mất khỏi đĩa.
     try:
         removed = get_index_manager().delete_by_file_id(file_id)
     except Exception as e:
@@ -257,6 +306,6 @@ def delete_file(file_id: str):
         pdf.unlink(missing_ok=True)
         _meta_path(file_id).unlink(missing_ok=True)
     except OSError as e:
-        # Trên Windows, file đang bị chương trình khác khóa (vd OneDrive đang đồng
-        # bộ) không xóa được: báo lỗi rõ ràng thay vì để server trả 500 trống.
+        # Trên Windows, file đang bị chương trình khác khóa (vd OneDrive đang đồng bộ)
+        # sẽ không xóa được: báo lỗi rõ ràng thay vì để server trả 500 trống.
         raise HTTPException(status_code=500, detail=f"Không xóa được file: {e}")

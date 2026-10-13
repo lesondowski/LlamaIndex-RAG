@@ -1,5 +1,6 @@
 # document private files
 document/
+document.md
 
 # Python
 __pycache__/
@@ -15,6 +16,7 @@ venv/
 env/
 .env
 .env.*
+pipeline_runs/
 
 # IDE
 .vscode/
@@ -32,19 +34,6 @@ data/
 dataset/
 datasets/
 outputs/
-
-# ============================================================================
-# RUNTIME DATA — backend/storage/
-# ----------------------------------------------------------------------------
-# Dữ liệu thay đổi khi app chạy (user upload, vector index, cache) nằm
-# trong backend/storage/. KHÔNG commit vì:
-#   1. Kích thước lớn (PDF, index có thể lên GB)
-#   2. Thay đổi liên tục → commit history rác
-#   3. Không cần thiết cho người clone repo
-#
-# Giữ folder tồn tại trên Git bằng .gitkeep. Không dùng pattern chung
-# "storage/" vì Git sẽ bỏ qua toàn bộ folder cha trước khi kịp xét ngoại lệ.
-# ============================================================================
 
 # Chặn mọi nội dung trong backend/storage/
 backend/storage/*

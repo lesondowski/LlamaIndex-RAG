@@ -1,105 +1,104 @@
 from pathlib import Path
 import json
+from collections.abc import Sequence
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser,SentenceSplitter
-
-
-
-MARKDOWN_FILE = "markdown/vinamilk.md"
-OUTPUT_FILE = "output/nodes.json"
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 150
+CHUNK_SIZE = 550
+CHUNK_OVERLAP = 64
 class Chunking:
-
-    def __init__(self,markdown_file=MARKDOWN_FILE,output_file=OUTPUT_FILE):
-        self.markdown_file = markdown_file
-        self.output_file = output_file
-
-
-    def load_markdown(self, path):
-
-        return Path(path).read_text(encoding="utf-8")
-
-    def create_document(self, markdown):
-        return Document(
-            text=markdown,
-            metadata={
-                "source": "vinamilk_report.pdf",
-                "document_type": "annual_report"
-            }
-        )
-
-
-    def parse_markdown(self, doc):
-
-        parser = MarkdownNodeParser()
-        return parser.get_nodes_from_documents([doc])
-
-
-    def split_large_nodes(self, nodes):
-        splitter = SentenceSplitter(chunk_size=CHUNK_SIZE,chunk_overlap=CHUNK_OVERLAP)
-        final_nodes = []
+    
+    def __init__( self,
+        output_file: str | Path,
+        chunk_size: int = 550, # chunk_size này không phải là đơn vị ký tự, lưu ý đây là token chứ không phai ký tự
+        chunk_overlap: int = 64, # Mức độ chồng nhau của các câu, set vừa đủ để k bị mất ngữ cảnh
+    ) -> None:
         
-        for node in nodes:
-            text = node.text
-            # node nhỏ giữ nguyên
-            if len(text) <= CHUNK_SIZE:
-                final_nodes.append(node)
-                continue
+        self.output_file = Path(output_file)
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+    def validate_documents(self, documents: Sequence[Document]):
+        valid_docs = [
+            document for document in documents
+            if document.text and document.text.strip()
+        ]
+        if not valid_docs:
+            return []
+        required_keys = ["document_id", "source", "file_name"]
+        for doc in valid_docs:
+            metadata = doc.metadata or {}
+            for key in required_keys:
+                if not metadata.get(key):
+                    raise ValueError(f"Document không có metadata - không có key bắt buộc{key}")
+            if metadata.get("page") is None:
+                raise ValueError("Document thiếu metadaata - Thiếu page")
+
+        return valid_docs
+
+        return doc
+    def chunk(self, documents: Sequence[Document]):
+        page_documents = self.validate_documents(documents)        
+        if not page_documents:
+            return []
+        #Như cũ      
+        sections = MarkdownNodeParser().get_nodes_from_documents(page_documents) # chia theo heading
+
+        splitter = SentenceSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        chunks = []
+
+        for section_index, section in enumerate(sections):
+            section_meta = dict(section.metadata) if section.metadata else {}
+            section_document = Document(text=section.text, metadata=section_meta)
+
+            section_chunks = splitter.get_nodes_from_documents([section_document])
+
+            for chunk_index, node in enumerate(section_chunks):
+                final_meta = dict(node.metadata) if node.metadata else {}
+                final_meta.update(
+                    {
+                        "section_index": section_index,
+                        "chunk_index": chunk_index,
+                        "content_type": "MD",
+                        "text_lenght_chars": len(node.text),
+                        "source": final_meta.get("source", ""),
+                        "file_name": final_meta.get("file_name", ""),
+                        "document_id": final_meta.get("document_id", ""),
+                        "page": final_meta.get("page", None),
+                    }
+                )
+                node.metadata = final_meta
+                chunks.append(node)
 
 
-            docs = [Document(text=text,metadata=node.metadata)]
-            chunks = splitter.get_nodes_from_documents(docs)
-            final_nodes.extend(chunks)
+        return chunks
 
 
-        return final_nodes
+    def save(self, nodes: list) -> None:
+        self.output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    def enrich_metadata(self, nodes):
+        data = [
+            {
+                "id": node.node_id,
+                "text": node.text,
+                "metadata": node.metadata
+            }
+            for node in nodes
+        ]
+        self.output_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        for idx, node in enumerate(nodes):
-            node.metadata.update(
-                {
-                    "node_id": idx,
-                    "chunk_size": len(node.text),
-                    "content_type": "text"
-                }
-            )
+
+
+    def run(self, documents: Sequence[Document]) -> list:
+        nodes = self.chunk(documents)
+        self.save(nodes)
+
         return nodes
 
-    def save_nodes(self, nodes, path):
-        data = []
-        for node in nodes:
-            data.append(
-                {
-                    "id": node.node_id,
-                    "text": node.text,
-                    "metadata": node.metadata
-                }
-            )
 
-        Path(path).parent.mkdir(exist_ok=True)
-        with open(path,"w",encoding="utf-8") as f:
 
-            json.dump(data,f,ensure_ascii=False,indent=2)
 
-    def load(self):
 
-        print("--- Loading Markdown ---")
-        markdown = self.load_markdown(self.markdown_file)
 
-        document = self.create_document(markdown)
-        print("--- Parsing Markdown ---")
 
-        nodes = self.parse_markdown(document)
-        print("Initial nodes:",len(nodes))
-        print("--- Chunking ---")
 
-        nodes = self.split_large_nodes(nodes)
-        print("Final nodes:",len(nodes))
 
-        nodes = self.enrich_metadata(nodes)
-        self.save_nodes(nodes,self.output_file)
-        print("Saved:",self.output_file)
-
-        return nodes
+        
