@@ -135,6 +135,8 @@ class IndexManager:
 
         Returns:
             list[NodeWithScore] — sắp xếp giảm dần theo score (cosine similarity).
+        
+        sử dụng kỹ thuật trong dense vector retrieval
         """
         self._ensure_ready()
         try:
@@ -145,6 +147,14 @@ class IndexManager:
             return retriever.retrieve(question)
         except Exception as exc:
             raise IndexingError(f"Truy xuất thất bại: {exc}") from exc
+
+    def as_retriever(self, top_k: int = 5, file_ids: list[str] | None =  None):
+        # tạo retriever native, xài cơ chế filter sẵn có
+        self._ensure_ready()
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 10:
+            raise ValueError("Top_k phải nằm trng khoảng từ 1 - 10")
+
+        return self._index.as_retriever(similarity_top_k=top_k, filters=self._build_filters(file_ids))
 
 
 # ----------------------------------------------------------------------

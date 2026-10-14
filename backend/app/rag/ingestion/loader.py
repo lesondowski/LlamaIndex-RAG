@@ -176,11 +176,17 @@ class PDFLoader:
         src.close()
         return page_map
 
-
-    def load_llama_parse(self,path_pdf: str, markdown_output: str,document_id: str | None = None,) -> list[Document]:
+    def load_llama_parse(self,path_pdf: str, markdown_output: str | Path | None = None ,document_id: str | None = None,) -> list[Document]:
         """
-        path_pdf: Name pdf data,
-        markdown_output: neu khong viet vao md. tu document ra thang chunking va nodes
+        Parse PDF bằng LlamaParse.
+
+        Args:
+            path_pdf: Đường dẫn tới file PDF.
+            markdown_output: Đường dẫn file Markdown đầu ra.
+            document_id: ID của document.
+
+        Returns:
+            Danh sách Document của LlamaIndex.
         """
         api_key = os.getenv("LLAMA_CLOUD_API_KEY")
 
@@ -189,21 +195,42 @@ class PDFLoader:
     
         path = self._validate_pdf_path(path_pdf)
         resolved_document_id = (document_id or path.stem)
+        print(f"PDF: {path}")
+        print(f"Document ID: {resolved_document_id}")
+        try: 
+            reader = LlamaParse(api_key=api_key,result_type="markdown",verbose=True,)
 
-        reader = LlamaParse(api_key=api_key,result_type="markdown",verbose=True,)
-
-        parsed_documents = reader.load_data(str(path))
-
+            parsed_documents = reader.load_data(str(path))
+        except Exception as exc:
+            print("=" * 70)
+            print("LLAMAPARSE ERROR")
+            print("=" * 70)
+            print(f"Type: {type(exc).__name__}")
+            print(f"Message: {exc}")
+            raise
+        print(f"LlamaParse returned {len(parsed_documents)} document(s).")
+        if not parsed_documents:
+            raise RuntimeError("LlamaParse không trả về Document nào.")
+        
         if markdown_output is not None:
             output_path = Path(markdown_output)
             output_path.parent.mkdir(parents=True,exist_ok=True,)
-            markdown_text = "\n\n---\n\n".join(
-                doc.text.strip()
-                for doc in parsed_documents
-                if doc.text
-                and doc.text.strip()
-            )
-            output_path.write_text(markdown_text,encoding="utf-8",)
+            
+            markdown_parts = []
+
+            for doc in parsed_documents:
+                if doc.text and doc.text.strip():
+                    markdown_parts.append(doc.text.strip())
+
+            if not markdown_parts:
+                raise RuntimeError(
+                    "LlamaParse có trả về Document "
+                    "nhưng tất cả Document đều không có nội dung."
+                )
+
+        markdown_text = "\n\n---\n\n".join(markdown_parts)
+
+        output_path.write_text(markdown_text,encoding="utf-8",)
 
         final_documents: list[Document] = []
 
@@ -213,11 +240,7 @@ class PDFLoader:
             metadata = dict(getattr(doc,"metadata",{},) or {})
 
             # Ưu tiên page metadata từ LlamaParse
-            page = (
-                metadata.get("page")
-                or metadata.get("page_number")
-                or index
-            )
+            page = ( metadata.get("page") or metadata.get("page_number") or index)
 
             final_documents.append(
                 Document(
@@ -235,6 +258,7 @@ class PDFLoader:
                     },
                 )
             )
-
+        if not final_documents:
+            raise RuntimeError("LlamaParse không tạo được Document có nội dung.")
         return final_documents
 

@@ -1,10 +1,3 @@
-"""
-vector_store.py — Khởi tạo Chroma (chạy nhúng, KHÔNG cần service riêng như
-Qdrant) và bọc thành ChromaVectorStore để llama_index dùng được.
-
-Lưu ý vận hành: PersistentClient KHÔNG an toàn khi nhiều process cùng ghi 1 thư mục
-→ chạy uvicorn với đúng 1 worker.
-"""
 import logging
 from functools import lru_cache
 
@@ -16,16 +9,9 @@ from app.config import BASE_DIR
 from app.rag.indexing.embeddings import embed_model_id
 
 log = logging.getLogger(__name__)
-
-# Nằm cạnh storage/uploads/ — đúng quy ước "mọi artifact runtime nằm dưới
-# storage/" đã thống nhất; không đặt trong database/ (chỗ đó dành cho
-# connection.py tới DB quan hệ, không phải vector data).
 CHROMA_DIR = BASE_DIR / "storage" / "chroma_db"
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-
-# 1 collection cho mọi báo cáo tài chính. Nếu sau này cần tách loại tài liệu,
-# tạo collection khác tên — không trộn nhiều loại filter logic vào 1 collection.
-COLLECTION_NAME = "financial_reports"
+COLLECTION_NAME = "SGKCTST"
 
 
 class EmbeddingModelMismatchError(RuntimeError):
@@ -34,26 +20,20 @@ class EmbeddingModelMismatchError(RuntimeError):
 
 @lru_cache(maxsize=1)
 def _get_client() -> chromadb.ClientAPI:
-    # PersistentClient: tự lưu xuống đĩa, sống qua các lần restart server —
-    # khác EphemeralClient (chỉ ở RAM, chỉ nên dùng cho test).
-    # Cache lại: đúng 1 client cho cả process, tránh mở nhiều connection cùng lúc
-    # tới cùng 1 thư mục SQLite (Chroma dùng SQLite làm metadata store bên dưới).
-    return chromadb.PersistentClient(path=str(CHROMA_DIR))
+    return chromadb.PersistentClient(path=str(CHROMA_DIR)) # Chroma persist vector database xuống disk
 
 
 @lru_cache(maxsize=1)
 def get_collection():
-    """Lấy (hoặc tạo) collection và kiểm tra dấu vân tay model embedding.
-
-    - hnsw:space=cosine: độ đo khoảng cách chọn LÚC TẠO, không đổi được sau đó;
-      mặc định của Chroma là L2. Collection tạo từ trước vẫn là L2 → muốn cosine
-      phải xóa storage/chroma_db và index lại.
-    - embed_model: lệch model → dừng ngay, thay vì âm thầm trộn hai không gian vector.
+    """
+    - Dense Vector Retrieval: giúp tìm các vector gần query
+    nhanh hơn so với việc tính khoảng cách với toàn bộ vector.
+    các vector được xếp hạng dựa trên khoảng cách cosine.
     """
     model_id = embed_model_id()
     collection = _get_client().get_or_create_collection(
         COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine", "embed_model": model_id},
+        metadata={"hnsw:space": "cosine", "embed_model": model_id}, #     cấu hình HNSW với metric cosine.
     )
     metadata = collection.metadata or {}
     stored_model_id = metadata.get("embed_model")
@@ -92,8 +72,7 @@ def get_collection():
 
 
 def get_vector_store() -> ChromaVectorStore:
-    """Hàm DUY NHẤT index_manager.py nên gọi để lấy vector store."""
-    return ChromaVectorStore(chroma_collection=get_collection())
+    return ChromaVectorStore(chroma_collection=get_collection()) #tạo adapter để LlamaIndex sử dụng Chroma.
 
 
 def get_storage_context() -> StorageContext:
@@ -107,7 +86,7 @@ def count_vectors() -> int:
 
 
 def count_by_file_id(file_id: str) -> int:
-    return len(get_collection().get(where={"file_id": file_id}, include=[])["ids"])
+    return len(get_collection().get(where={"file_id": file_id}, include=[])["ids"]) #metadata filtering.
 
 
 def delete_by_file_id(file_id: str) -> int:
