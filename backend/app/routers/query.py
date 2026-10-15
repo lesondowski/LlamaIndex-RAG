@@ -32,7 +32,12 @@ def query_stream(request: QueryRequest) -> StreamingResponse:
             results = Retriever().retrieve(
                 question= request.question,
                 top_k=request.top_k,
-                file_ids= request.file_ids
+                file_ids= request.file_ids,
+                subject= request.subject,
+                grade= request.grade,
+                series= request.series,
+                page_from= request.page_from,
+                page_to= request.page_to
             )
 
             if not results:
