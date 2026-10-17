@@ -110,3 +110,22 @@ def list_file_ids(page_size: int = 1000) -> set[str]:
             return found
         found.update(m["file_id"] for m in metas if m and "file_id" in m)
         offset += len(metas)
+
+def update_metadata_by_file_id(file_id: str, new_tags: dict) -> int:
+    """Cập nhật metadata cho toàn bộ chunk của một file_id.
+    Không tạo lại vector, không tốn API Embedding.
+    """
+    collection = get_collection()
+    # 1. Lấy tất cả chunk hiện có của file này
+    got = collection.get(where={"file_id": file_id}, include=["metadatas"])
+    ids = got["ids"]
+    
+    if not ids:
+        return 0
+        
+    # 2. Merge metadata cũ với metadata mới
+    new_metas = [{**(m or {}), **new_tags} for m in got["metadatas"]]
+    
+    # 3. Update thẳng vào Chroma
+    collection.update(ids=ids, metadatas=new_metas)
+    return len(ids)

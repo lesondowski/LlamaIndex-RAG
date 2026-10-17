@@ -1,14 +1,8 @@
-"""Quản lý vector index: khởi tạo, ingest, query, xóa.
+"""Quản lý vector index: khởi tạo, ingest, query, cập nhật, xóa.
 
-Bọc VectorStoreIndex (LlamaIndex) trên Chroma; chuyển QueryScope thành
-MetadataFilters qua filters.build_filters.
-
-Vận hành: Chroma embedded không an toàn multi-writer → chạy uvicorn 1 worker.
-_write_lock serialize ghi/xóa trong process.
-
-Hai đường filter:
-  - build_filters(scope) — đường chính, đủ file_ids/subject/grade/series/page.
-  - _build_filters(file_ids) — đường cũ, chỉ giữ để tương thích.
+Bọc VectorStoreIndex (LlamaIndex) trên Chroma. 
+Sử dụng _write_lock để serialize các thao tác ghi/xóa vì Chroma embedded 
+không an toàn với multi-writer (yêu cầu chạy uvicorn 1 worker).
 """
 from __future__ import annotations
 
@@ -34,7 +28,7 @@ log = logging.getLogger(__name__)
 
 INGEST_BATCH_SIZE = 64
 
-# Metadata LLM được thấy khi synthesize — đủ để làm citation, không gây nhiễu.
+# Metadata được phép hiển thị cho LLM khi tổng hợp câu trả lời (tránh gây nhiễu)
 _LLM_VISIBLE_KEYS = (FILE_NAME, PAGE)
 
 _TOP_K_MIN, _TOP_K_MAX = 1, 10
@@ -45,8 +39,9 @@ class IndexingError(RuntimeError):
 
 
 def _validate_top_k(top_k: int) -> None:
-    """Chặn bool trước int: isinstance(True, int) là True, nếu không chặn
-    thì top_k=True sẽ thành top_k=1 và qua mặt validate."""
+    """Chặn bool trước int: trong Python, isinstance(True, int) là True.
+    Nếu không chặn, top_k=True sẽ bị ép thành top_k=1 và lọt qua validate.
+    """
     if (
         isinstance(top_k, bool)
         or not isinstance(top_k, int)
@@ -60,14 +55,14 @@ def _validate_top_k(top_k: int) -> None:
 class IndexManager:
     """Quản lý vòng đời vector index và thao tác ghi/đọc/xóa.
 
-    Index được khởi tạo trễ ở lần dùng đầu (không tạo kết nối khi import).
+    Index được khởi tạo trễ ở lần dùng đầu tiên (lazy initialization).
     """
 
     def __init__(self) -> None:
         self._index: VectorStoreIndex | None = None
         self._embed = None
-        self._init_lock = threading.Lock()    # double-check khởi tạo
-        self._write_lock = threading.Lock()   # serialize ghi/xóa (Chroma 1 writer)
+        self._init_lock = threading.Lock()    # Bảo vệ quá trình khởi tạo (double-check)
+        self._write_lock = threading.Lock()   # Serialize ghi/xóa (Chroma 1 writer)
 
     def _ensure_ready(self) -> None:
         """Load embed model + index một lần (fast path + lock + double-check)."""
@@ -104,8 +99,7 @@ class IndexManager:
         file_ids: list[str] | None,
         scope: QueryScope | None,
     ) -> MetadataFilters | None:
-        """Chọn đường filter; chặn mix cả hai. Guard đặt đây để query()
-        và as_retriever() dùng chung, không lặp."""
+        """Chọn đường filter; chặn việc truyền cả hai tham số cùng lúc."""
         if scope is not None and file_ids is not None:
             raise ValueError("Chỉ truyền một trong hai: file_ids hoặc scope")
         if scope is not None:
@@ -115,15 +109,15 @@ class IndexManager:
     def ingest_nodes(self, nodes: list[BaseNode], file_id: str, file_name: str) -> int:
         """Gắn metadata và ghi chunks vào Chroma. Trả về số chunk đã ghi.
 
-        Idempotent (id tất định) và rollback (xóa chunk khi lỗi giữa chừng).
-        Raises IndexingError khi nodes rỗng, thiếu page, hoặc ghi lỗi.
+        Cơ chế Idempotent: node.id_ được tạo tất định từ file_id + index.
+        Nếu ghi đè, các chunk cũ của file_id sẽ bị xóa trước khi ghi chunk mới.
         """
         if not nodes:
             raise IndexingError("Không có chunk nào để index.")
 
         self._ensure_ready()
 
-        # Thiếu page thì không tạo được citation → dừng trước khi ghi vector.
+        # Thiếu page metadata thì không thể tạo citation -> Dừng trước khi ghi vector.
         for node in nodes:
             if node.metadata.get(PAGE) is None:
                 raise IndexingError(
@@ -131,12 +125,12 @@ class IndexManager:
                 )
 
         for i, node in enumerate(nodes):
-            node.id_ = f"{file_id}_{i:05d}"   # id tất định → re-index ghi đè
+            node.id_ = f"{file_id}_{i:05d}"   # ID tất định -> re-index sẽ ghi đè
             node.metadata[FILE_ID] = file_id
             node.metadata[FILE_NAME] = file_name
             node.metadata["source"] = file_name
 
-            # Loại metadata khỏi text embed (tránh nhiễu); LLM chỉ thấy file_name + page.
+            # Ẩn metadata khỏi text embed (tránh nhiễu); LLM chỉ thấy file_name + page.
             keys = list(node.metadata.keys())
             node.excluded_embed_metadata_keys = keys
             node.excluded_llm_metadata_keys = [
@@ -145,7 +139,7 @@ class IndexManager:
 
         with self._write_lock:
             try:
-                vs.delete_by_file_id(file_id)   # xóa chunk cũ (nếu có)
+                vs.delete_by_file_id(file_id)   # Xóa chunk cũ (nếu có)
                 for start in range(0, len(nodes), INGEST_BATCH_SIZE):
                     batch = nodes[start:start + INGEST_BATCH_SIZE]
                     self._index.insert_nodes(batch)
@@ -159,11 +153,26 @@ class IndexManager:
 
         return len(nodes)
 
+    def update_metadata(self, file_id: str, new_tags: dict) -> int:
+        """Cập nhật metadata trực tiếp trên Chroma mà KHÔNG re-embed.
+        
+        Rất hữu ích khi người dùng chỉ muốn sửa tag (subject, grade, ...).
+        Tiết kiệm 100% chi phí gọi API Gemini Embedding.
+        """
+        with self._write_lock:
+            try:
+                # Gọi hàm vector_store để cập nhật thẳng vào ChromaDB
+                updated_count = vs.update_metadata_by_file_id(file_id, new_tags)
+                log.info("Đã cập nhật metadata cho %s chunk của file_id=%s", updated_count, file_id)
+                return updated_count
+            except Exception as exc:
+                log.exception("Cập nhật metadata thất bại cho file_id=%s", file_id)
+                raise IndexingError(f"Không thể cập nhật metadata: {exc}") from exc
+
     def delete_by_file_id(self, file_id: str) -> int:
         """Xóa mọi chunk của file_id. Trả về số chunk đã xóa.
 
-        Không cần embed model — chỉ gọi Chroma API, nên chạy được khi
-        thiếu API key hoặc không có mạng.
+        Không cần embed model — chỉ gọi Chroma API, nên có thể chạy offline.
         """
         with self._write_lock:
             try:
@@ -183,14 +192,11 @@ class IndexManager:
         """Truy hồi top-k node gần nhất với câu hỏi.
 
         scope và file_ids loại trừ nhau — truyền cả hai sẽ raise ValueError.
-
-        Returns:
-            list[NodeWithScore] — sắp xếp giảm dần theo cosine similarity.
         """
         _validate_top_k(top_k)
 
-        # Dựng filter trước khi load embed: scope sai báo lỗi ngay, không tốn
-        # API Gemini; MetadataError không bị gói thành IndexingError.
+        # Dựng filter TRƯỚC khi load embed: 
+        # Nếu scope sai, báo lỗi ngay, không tốn chi phí gọi API Gemini.
         filters = self._resolve_filters(file_ids, scope)
         self._ensure_ready()
 
@@ -211,8 +217,7 @@ class IndexManager:
     ) -> BaseRetriever:
         """Trả về retriever native của LlamaIndex, chưa chạy query.
 
-        Dùng khi ghép với query engine nâng cao (reranking, RetrieverQueryEngine).
-        Đường chính /query/stream gọi query() trực tiếp.
+        Dùng khi cần ghép nối với Query Engine nâng cao (reranking, v.v.).
         """
         _validate_top_k(top_k)
 
@@ -230,15 +235,13 @@ class IndexManager:
 # ----------------------------------------------------------------------
 @lru_cache(maxsize=1)
 def get_index_manager() -> IndexManager:
-    """Trả về đúng 1 instance dùng chung cho toàn process."""
+    """Trả về đúng 1 instance dùng chung cho toàn process (Thread-safe)."""
     return IndexManager()
 
 
 def __getattr__(name: str):
     """Tương thích ngược cho `from ...index_manager import index_manager`.
-
-    Nhờ PEP 562, import tên này không tạo instance ngay — chỉ tạo khi gọi
-    tới, và vẫn đi qua cache của get_index_manager().
+    Nhờ PEP 562, instance chỉ được tạo khi thực sự gọi tới.
     """
     if name == "index_manager":
         return get_index_manager()
