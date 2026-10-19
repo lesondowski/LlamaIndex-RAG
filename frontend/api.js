@@ -50,7 +50,7 @@ window.api = (() => {
       onProcessing();
       await sleep(900);
       if (stop) throw abortErr();
-      return { id: 'file-' + Math.random().toString(36).slice(2, 8) };
+      return { file_id: 'file-' + Math.random().toString(36).slice(2, 8) }; // Đổi id thành file_id cho đồng bộ
     })();
     return { promise, abort: () => { stop = true; } };
   }
@@ -67,7 +67,8 @@ window.api = (() => {
         let j = {};
         try { j = JSON.parse(xhr.responseText); } catch (_) { }
         if (xhr.status >= 200 && xhr.status < 300) {
-          res({ id: j.file_id ?? j.id ?? null });
+          // Backend trả về { file_id, status, message }
+          res(j);
         } else {
           rej(fail('server', 'HTTP ' + xhr.status + ' ' + (j.detail || '')));
         }
@@ -95,25 +96,31 @@ window.api = (() => {
   }
 
   /* --------------------------------------------------------------------------
-   * DEMO_QA — ĐÃ CẬP NHẬT: Dữ liệu giả lập cho môn Toán, Lý, Văn (SGK)
+   * getFileStatusReal — API mới phục vụ Polling tiến trình ngầm
+   * -------------------------------------------------------------------------- */
+  async function getFileStatusReal(fileId) {
+    const res = await fetch(`${CONFIG.BASE}${CONFIG.EP.files}/${fileId}/status`);
+    if (!res.ok) throw fail('server', 'HTTP ' + res.status);
+    return await res.json(); // Trả về { status, progress, message }
+  }
+
+  /* --------------------------------------------------------------------------
+   * DEMO_QA — Dữ liệu giả lập cho môn Toán, Lý, Văn (SGK)
    * -------------------------------------------------------------------------- */
   const DEMO_QA = [
     {
-      // 1. MÔN TOÁN (Test render KaTeX)
       re: /toán|hình tròn|diện tích|phương trình|bán kính/i,
       page: 45,
       ans: 'Công thức tính diện tích hình tròn là \\(S = \\pi r^2\\), trong đó \\(r\\) là bán kính của hình tròn [1].\n\nNgoài ra, chu vi hình tròn được tính bằng công thức \\(C = 2\\pi r\\) [1].',
       snip: 'Diện tích hình tròn được tính bằng công thức S = \\pi r^2. Chu vi hình tròn là C = 2\\pi r.'
     },
     {
-      // 2. MÔN VẬT LÝ (Test render Markdown Table)
       re: /lý|vận tốc|ohm|điện trở|cường độ/i,
       page: 112,
       ans: 'Định luật Ohm phát biểu rằng cường độ dòng điện chạy qua dây dẫn tỉ lệ thuận với hiệu điện thế đặt vào hai đầu dây và tỉ lệ nghịch với điện trở của dây [1].\n\n| Đại lượng | Ký hiệu | Đơn vị |\n|---|---|---|\n| Hiệu điện thế | U | Vôn (V) |\n| Cường độ dòng điện | I | Ampe (A) |\n| Điện trở | R | Ôm (Ω) |',
       snip: 'Công thức định luật Ohm: I = U / R. Trong đó U là hiệu điện thế, I là cường độ dòng điện, R là điện trở.'
     },
     {
-      // 3. MÔN NGỮ VĂN / LỊCH SỬ (Text thuần)
       re: /văn|chí phèo|nam cao|điện biên phủ|lịch sử/i,
       page: 28,
       ans: 'Tác phẩm "Chí Phèo" của nhà văn Nam Cao kể về bi kịch của người nông dân bị tha hóa bởi xã hội phong kiến và thực dân nửa phong kiến [1]. Hình ảnh Chí Phèo là tiếng kêu cứu của con người bị tước đoạt quyền làm người.',
@@ -125,7 +132,6 @@ window.api = (() => {
     const hit = DEMO_QA.find(x => x.re.test(message));
     const sid = sourceIds[0] ?? null;
     
-    // Đổi tên file fallback cho đúng ngữ cảnh SGK
     const source = sid == null ? 'Dữ liệu SGK có sẵn' : ((h.sourceName && h.sourceName(sid)) || 'Sách giáo khoa.pdf');
     const st = t => h.onStatus && h.onStatus(t);
     const chk = () => { if (h.signal && h.signal.aborted) throw abortErr(); };
@@ -244,11 +250,23 @@ window.api = (() => {
     }
   }
 
+  // ==========================================================================
+  // PUBLIC API
+  // ==========================================================================
   return {
     CONFIG, validateFile, checkHealth,
     uploadFile: (f, cb) => (CONFIG.USE_MOCK ? uploadMock : uploadReal)(f, cb),
     sendChat: (req, h) => (CONFIG.USE_MOCK ? chatMock : chatReal)(req, h),
     listFiles: () => (CONFIG.USE_MOCK ? Promise.resolve([]) : listFilesReal()),
-    deleteFile: fileId => (CONFIG.USE_MOCK ? Promise.resolve() : deleteFileReal(fileId))
+    deleteFile: fileId => (CONFIG.USE_MOCK ? Promise.resolve() : deleteFileReal(fileId)),
+    
+    // API MỚI: Dùng để Polling trạng thái xử lý ngầm
+    getFileStatus: (fileId) => {
+      if (CONFIG.USE_MOCK) {
+        // Giả lập trả về trạng thái hoàn tất ngay lập tức
+        return Promise.resolve({ status: 'indexed', progress: 100, message: 'Mock sẵn sàng' });
+      }
+      return getFileStatusReal(fileId);
+    }
   };
 })();
