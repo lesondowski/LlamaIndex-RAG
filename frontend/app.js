@@ -29,41 +29,49 @@ if (!CONFIG.USE_MOCK) {
   chk(); setInterval(chk, 20000); loadExistingFiles();
 }
 
+// ================= LOAD & RENDER FILES =================
 async function loadExistingFiles() {
+  let list = [];
   try {
-    const list = await api.listFiles();
-    for (const item of list) {
-      const id = uid('file');
-      state.files.set(id, { id, name: item.name, size: item.size, type: 'application/pdf', status: 'ready', progress: 100, selected: true, serverId: item.file_id });
-    }
-    renderFiles();
-  } catch (e) {}
+    list = await api.listFiles();
+  } catch (e) {
+    // Không toast ở đây: health-check phía trên đã báo "Không thể kết nối máy chủ"
+    // nếu backend thật sự không phản hồi - tránh 2 thông báo lỗi trùng ý cùng lúc.
+    console.error('[App] load existing files error', e);
+    return;
+  }
+
+  for (const item of list) {
+    const id = uid('file');
+    state.files.set(id, {
+      id,
+      name: item.name,
+      size: item.size,
+      type: 'application/pdf',
+      status: item.status === 'indexed' ? 'ready' : 'saved',
+      progress: 100,
+      selected: item.status === 'indexed',
+      blob: null,
+      serverId: item.file_id
+    });
+  }
+  renderFiles();
 }
 
-function setCitesOpen(open, manual) {
-  if (manual) state.userToggled = true;
-  $('layout').classList.toggle('cites-open', open);
-  $('cites-panel').inert = !open;
-  $('cites-toggle').setAttribute('aria-expanded', String(open));
-}
-const citesOpen = () => $('layout').classList.contains('cites-open');
+// Map status -> function sinh label hiển thị
+// uploading cần tham số f để lấy progress
+const STATUS_LABEL = {
+  uploading: f => 'Đang tải lên... ' + f.progress + '%',
+  processing: () => 'Đang xử lý...',
+  ready: () => 'Sẵn sàng',
+  saved: () => 'Đã lưu',
+  error: () => 'Không thể tải file'
+};
 
-function setSrcOpen(open) {
-  state.srcOpen = open;
-  $('layout').classList.toggle('src-closed', !open);
-  $('show-src-btn').style.display = open ? 'none' : 'inline-grid';
-}
-
-$('cites-toggle').onclick = () => setCitesOpen(!citesOpen(), true);
-$('cites-close').onclick = () => setCitesOpen(false, true);
-$('hide-src-btn').onclick = () => setSrcOpen(false);
-$('show-src-btn').onclick = () => setSrcOpen(true);
-$('scrim').onclick = () => { setCitesOpen(false, true); setSrcOpen(false); };
-
-// ================= RENDER FILES =================
 function renderFiles() {
   const list = $('src-list'); list.textContent = '';
   const rd = readyFiles(); const sel = rd.filter(f => f.selected).length;
+  
   $('src-count').textContent = allFiles().length;
   $('select-all-row').hidden = !rd.length;
   $('select-all').checked = rd.length > 0 && sel === rd.length;
@@ -80,7 +88,13 @@ function renderFiles() {
     }
     const mid = document.createElement('div'); mid.className = 'mid';
     const nm = document.createElement('div'); nm.className = 'nm'; nm.title = f.name; nm.textContent = f.name;
-    const ss = document.createElement('span'); ss.className = 'stt ' + f.status; ss.innerHTML = `<i class="dot"></i> ${f.status === 'uploading' ? f.progress + '%' : (f.status === 'ready' ? 'Sẵn sàng' : 'Lỗi')}`;
+    
+    // Sử dụng STATUS_LABEL
+    const ss = document.createElement('span'); 
+    ss.className = 'stt ' + f.status; 
+    const label = STATUS_LABEL[f.status] ? STATUS_LABEL[f.status](f) : f.status;
+    ss.innerHTML = `<i class="dot"></i> ${label}`;
+    
     mid.append(nm, ss); el.appendChild(mid);
     
     if (f.status === 'uploading' || f.status === 'processing') {
@@ -104,6 +118,46 @@ function renderFiles() {
   syncSend();
 }
 
+function setCitesOpen(open, manual) {
+  if (manual) state.userToggled = true;
+  $('layout').classList.toggle('cites-open', open);
+  $('cites-panel').inert = !open;
+  $('cites-toggle').setAttribute('aria-expanded', String(open));
+}
+const citesOpen = () => $('layout').classList.contains('cites-open');
+
+function setSrcOpen(open) {
+  state.srcOpen = open;
+  $('layout').classList.toggle('src-closed', !open);
+  $('show-src-btn').style.display = open ? 'none' : 'inline-grid';
+}
+
+$('cites-toggle').onclick = () => setCitesOpen(!citesOpen(), true);
+$('cites-close').onclick = () => setCitesOpen(false, true);
+$('hide-src-btn').onclick = () => setSrcOpen(false);
+$('show-src-btn').onclick = () => setSrcOpen(true);
+$('scrim').onclick = () => { setCitesOpen(false, true); setSrcOpen(false); };
+
+// ================= KEYBOARD SHORTCUTS =================
+document.addEventListener('keydown', e => {
+  // Ctrl/Cmd + B -> toggle panel Trích dẫn
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    setCitesOpen(!citesOpen(), true);
+    return;
+  }
+
+  // Escape
+  if (e.key === 'Escape') {
+    // Nếu đang stream -> ưu tiên Dừng trước
+    if (state.sending) { stopGen(); return; }
+
+    // Ngược lại: đóng drawer nếu đang mở
+    if (innerWidth <= 1200 && citesOpen()) setCitesOpen(false, true);
+    setSrcOpen(false);
+  }
+});
+
 // ================= UPLOAD EVENTS =================
 const fi = $('file-input'); const dz = $('dropzone');
 dz.onclick = () => fi.click();
@@ -120,6 +174,7 @@ async function addFiles(list) {
     startUpload(id);
   }
 }
+
 function startUpload(id) {
   const f = state.files.get(id); if (!f) return;
   Object.assign(f, { status: 'uploading', progress: 0 }); renderFiles();
@@ -249,7 +304,6 @@ function buildAfter(m) {
 
   af.append(cp, rg, tu, td);
   
-  // Hiển thị chip nguồn nếu LLM không inline cite [n], kèm tên file (đã escape HTML)
   if (m.citations.length && !/\[\d+\]/.test(m.content)) {
     const sr = document.createElement('div'); sr.className = 'sources';
     m.citations.forEach(c => {
@@ -278,8 +332,6 @@ function renderMsg(m) {
   if (m.role === 'user') { b.textContent = m.content; buildAfter(m); return; }
   
   if (m.status === 'pending') { b.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="pl"></span>'; b.querySelector('.pl').textContent = m.label || 'Đang tìm câu trả lời…'; }
-  
-  // Phân biệt Abort (đã dừng) với lỗi thật (network/server)
   else if (m.status === 'error') {
     const isAbort = m.errKind === 'abort';
     b.innerHTML = ico(isAbort ? 'stop' : 'alert');
@@ -289,12 +341,10 @@ function renderMsg(m) {
       : (m.errKind === 'network' ? 'Không thể kết nối máy chủ.' : (m.errMessage || 'Đã xảy ra lỗi khi xử lý.'));
     b.appendChild(sp);
     
-    // Không hiện nút "Thử lại" cho Abort vì đây là hành động chủ động của user
     if (!isAbort) {
       const rb = document.createElement('button'); rb.className = 'retry'; rb.textContent = 'Thử lại'; rb.onclick = () => retry(m); b.appendChild(rb);
     }
   }
-  
   else {
     b.textContent = ''; richText(b, m.content, m);
     if (m.status === 'streaming') {
@@ -329,7 +379,6 @@ async function run(m) {
       sourceName: id => (allFiles().find(f => refOf(f) === id) || {}).name,
       onStatus: s => { if (m.status === 'pending') { m.label = s; renderMsg(m); } },
       onNotFound: () => { m.notFound = true; },
-      // Render toàn bộ citations từ backend, không lọc bỏ khi đang stream
       onCitations: cs => { 
         m.citations = cs; 
         renderCites(cs); 
@@ -345,7 +394,6 @@ async function run(m) {
     }
     m.content = m.content.trim();
     
-    // Đồng bộ lại lần cuối
     renderCites(m.citations);
     
     if (!CONFIG.USE_MOCK) setStatus('ok');
@@ -431,7 +479,6 @@ function showCite(list, n) {
   });
 }
 
-// citeCard hiển thị thêm tên file
 function citeCard(c) {
   const el = document.createElement('div'); el.className = 'cite'; el.id = 'cite-' + c.id;
   
