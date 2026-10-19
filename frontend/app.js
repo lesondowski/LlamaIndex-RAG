@@ -7,7 +7,6 @@ const state = {
 
 const uid = p => p + '-' + String(++state.seq).padStart(3, '0');
 const ico = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
-const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 const allFiles = () => [...state.files.values()];
 const readyFiles = () => allFiles().filter(f => f.status === 'ready');
 const refOf = f => f.serverId ?? f.id;
@@ -134,10 +133,8 @@ const scrollToBottom = () => { const c = $('chat-container'); c.scrollTop = c.sc
 
 // ================= MARKDOWN & KATEX PARSER =================
 function renderRichInline(parent, text, m) {
-  // Fix khoảng trắng dấu câu
   text = text.replace(/\s*\[(\d+)\]\s*([.,:;!?])/g, '$2[$1]').replace(/\s+\[(\d+)\]/g, '[$1]');
 
-  // Parse HTML thô (<sup>, <sub>)
   if (/<[a-z]+>/i.test(text)) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${text}</div>`, 'text/html');
@@ -157,7 +154,6 @@ function renderRichInline(parent, text, m) {
   }
 
   function processTextNode(txt) {
-    // Tách KaTeX, Bold, Italic, Code, Cite
     const parts = txt.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|`[^`\n]+`|\*(?!\s)[^*\n]+?(?<!\s)\*|\[\d+\])/);
     parts.forEach(p => {
       if (!p) return; let mm;
@@ -192,7 +188,6 @@ function renderRichInline(parent, text, m) {
   }
 }
 
-const isNum = t => /^[-+]?[\d.,]+\s*(%|tỷ|triệu|đồng|lần)?$/i.test(t.trim());
 const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
 const LI = /^\s*([-*]|\d+\.)\s+(.*)$/;
 
@@ -202,7 +197,6 @@ function richText(b, text, m) {
 
   while (i < lines.length) {
     const ln = lines[i];
-    // Table
     if (/^\s*\|/.test(ln) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
       flush(); const head = cells(ln); const rows = []; i += 2;
       while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(cells(lines[i++])); }
@@ -210,7 +204,6 @@ function richText(b, text, m) {
       wrap.innerHTML = `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
       b.appendChild(wrap); continue;
     }
-    // List
     const li = LI.exec(ln);
     if (li) {
       flush(); const ord = /\d/.test(li[1]); const list = document.createElement(ord ? 'ol' : 'ul');
@@ -221,7 +214,6 @@ function richText(b, text, m) {
       }
       b.appendChild(list); continue;
     }
-    // Heading
     if (/^#{1,4}\s/.test(ln)) {
       flush();
       const level = ln.match(/^#+/)[0].length;
@@ -229,7 +221,6 @@ function richText(b, text, m) {
       renderRichInline(h, ln.replace(/^#+\s+/, ''), m);
       b.appendChild(h); i++; continue;
     }
-    // Para
     if (!ln.trim()) { flush(); i++; continue; }
     para.push(ln); i++;
   }
@@ -258,11 +249,14 @@ function buildAfter(m) {
 
   af.append(cp, rg, tu, td);
   
-  const usedCites = m.citations.filter(c => m.content.includes(`[${c.id}]`));
-  if (usedCites.length && !/\[\d+\]/.test(m.content)) {
+  // Hiển thị chip nguồn nếu LLM không inline cite [n], kèm tên file (đã escape HTML)
+  if (m.citations.length && !/\[\d+\]/.test(m.content)) {
     const sr = document.createElement('div'); sr.className = 'sources';
-    usedCites.forEach(c => {
-      const k = document.createElement('button'); k.className = 'chip'; k.innerHTML = `<b>${c.id}</b> Trang ${c.page}`; k.onclick = () => showCite(m.citations, c.id); sr.appendChild(k);
+    m.citations.forEach(c => {
+      const k = document.createElement('button'); k.className = 'chip';
+      const safeName = String(c.source || 'Nguồn').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      k.innerHTML = `<b>${c.id}</b> <span class="chip-src">${safeName}</span> · Tr.${c.page}`; 
+      k.onclick = () => showCite(m.citations, c.id); sr.appendChild(k);
     });
     af.appendChild(sr);
   }
@@ -284,11 +278,23 @@ function renderMsg(m) {
   if (m.role === 'user') { b.textContent = m.content; buildAfter(m); return; }
   
   if (m.status === 'pending') { b.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="pl"></span>'; b.querySelector('.pl').textContent = m.label || 'Đang tìm câu trả lời…'; }
+  
+  // Phân biệt Abort (đã dừng) với lỗi thật (network/server)
   else if (m.status === 'error') {
-    b.innerHTML = ico('alert');
-    const sp = document.createElement('span'); sp.textContent = m.errKind === 'network' ? 'Không thể kết nối máy chủ.' : 'Đã xảy ra lỗi khi xử lý.'; b.appendChild(sp);
-    const rb = document.createElement('button'); rb.className = 'retry'; rb.textContent = 'Thử lại'; rb.onclick = () => retry(m); b.appendChild(rb);
+    const isAbort = m.errKind === 'abort';
+    b.innerHTML = ico(isAbort ? 'stop' : 'alert');
+    const sp = document.createElement('span');
+    sp.textContent = isAbort 
+      ? (m.content || 'Đã dừng.') 
+      : (m.errKind === 'network' ? 'Không thể kết nối máy chủ.' : (m.errMessage || 'Đã xảy ra lỗi khi xử lý.'));
+    b.appendChild(sp);
+    
+    // Không hiện nút "Thử lại" cho Abort vì đây là hành động chủ động của user
+    if (!isAbort) {
+      const rb = document.createElement('button'); rb.className = 'retry'; rb.textContent = 'Thử lại'; rb.onclick = () => retry(m); b.appendChild(rb);
+    }
   }
+  
   else {
     b.textContent = ''; richText(b, m.content, m);
     if (m.status === 'streaming') {
@@ -314,28 +320,33 @@ function editUserMessage(m) {
 
 async function run(m) {
   state.sending = true; state.active = m;
-  Object.assign(m, { status: 'pending', content: '', citations: [], label: '', errKind: null, notFound: false });
+  Object.assign(m, { status: 'pending', content: '', citations: [], label: '', errKind: null, errMessage: null, notFound: false });
   renderMsg(m); syncSend(); scrollToBottom();
+  
   try {
     await api.sendChat(m.request, {
       signal: (m.ctrl = new AbortController()).signal,
       sourceName: id => (allFiles().find(f => refOf(f) === id) || {}).name,
       onStatus: s => { if (m.status === 'pending') { m.label = s; renderMsg(m); } },
       onNotFound: () => { m.notFound = true; },
+      // Render toàn bộ citations từ backend, không lọc bỏ khi đang stream
       onCitations: cs => { 
         m.citations = cs; 
-        const usedCites = cs.filter(c => m.content.includes(`[${c.id}]`));
-        renderCites(usedCites); 
-        if (usedCites.length && !state.userToggled && innerWidth > 1200) setCitesOpen(true); 
+        renderCites(cs); 
+        if (cs.length && !state.userToggled && innerWidth > 1200) setCitesOpen(true); 
       },
       onToken: t => { m.status = 'streaming'; m.content += t; renderMsg(m); scrollToBottom(); },
     });
+    
     m.status = 'complete';
-    if (!m.content.trim()) { m.notFound = true; m.content = m.request.sourceIds.length ? 'Tôi không tìm thấy thông tin trong tài liệu đã chọn.' : 'Tôi không tìm thấy thông tin trong dữ liệu.'; }
+    if (!m.content.trim()) { 
+      m.notFound = true; 
+      m.content = m.request.sourceIds.length ? 'Tôi không tìm thấy thông tin trong tài liệu đã chọn.' : 'Tôi không tìm thấy thông tin trong dữ liệu.'; 
+    }
     m.content = m.content.trim();
     
-    const usedCites = m.citations.filter(c => m.content.includes(`[${c.id}]`));
-    renderCites(usedCites);
+    // Đồng bộ lại lần cuối
+    renderCites(m.citations);
     
     if (!CONFIG.USE_MOCK) setStatus('ok');
   } catch (e) {
@@ -344,7 +355,11 @@ async function run(m) {
       if (!had) { m.status = 'error'; m.errKind = 'abort'; m.content = 'Đã dừng.'; }
       else { m.content = had + ' [Đã dừng]'; }
     }
-    else { m.status = 'error'; m.errKind = e.kind; }
+    else { 
+      m.status = 'error'; 
+      m.errKind = e.kind; 
+      m.errMessage = e.message; 
+    }
   } finally {
     state.sending = false; renderMsg(m); syncSend(); scrollToBottom(); $('user-input').focus();
   }
@@ -416,39 +431,29 @@ function showCite(list, n) {
   });
 }
 
-// Xử lý hiển thị Trích dẫn (Context-aware & Hỗ trợ KaTeX)
+// citeCard hiển thị thêm tên file
 function citeCard(c) {
   const el = document.createElement('div'); el.className = 'cite'; el.id = 'cite-' + c.id;
   
-  // ==========================================
-  // TẦNG 1: HEADER
-  // ==========================================
   const top = document.createElement('div'); top.className = 'top';
-  top.innerHTML = `<span class="n">${c.id}</span> <span class="pg">Trang ${c.page}</span>`;
+  const nSpan = document.createElement('span'); nSpan.className = 'n'; nSpan.textContent = c.id;
+  const fnameSpan = document.createElement('span'); fnameSpan.className = 'fname'; fnameSpan.textContent = c.source || 'Nguồn không xác định'; fnameSpan.title = c.source || 'Nguồn không xác định';
+  const pgSpan = document.createElement('span'); pgSpan.className = 'pg'; pgSpan.textContent = 'Trang ' + (c.page ?? '?');
   
   const pdfBtn = document.createElement('button'); pdfBtn.className = 'icon-btn pdf-btn'; pdfBtn.title = 'Xem tài liệu gốc';
   pdfBtn.innerHTML = ico('external-link'); pdfBtn.onclick = (e) => { e.stopPropagation(); toast('Mở PDF Viewer...', 'warn'); };
-  top.appendChild(pdfBtn);
+  
+  top.append(nSpan, fnameSpan, pgSpan, pdfBtn);
   el.appendChild(top);
 
-  // ==========================================
-  // TẦNG 2 & 3: XỬ LÝ VĂN BẢN THÔ
-  // ==========================================
   let rawText = c.excerpt || '';
-
-  // 1. Xóa các mẩu rác bị cắt cụt ở cuối (ví dụ: ### A, # B) và dấu '---'
   rawText = rawText.replace(/#{1,6}\s*[A-Z]$/gm, '').replace(/^---$/gm, '').trim();
-  
-  // 2. Xóa Emoji rác do LlamaParse sinh ra (☝️, 🌟, 📌,...)
   rawText = rawText.replace(/[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}]/gu, '');
-
-  // 3. Tự động chèn \n trước các tiêu đề # (nếu văn bản bị dính chùm)
   rawText = rawText.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2');
 
   let headings = [];
   let bodyParts = [];
 
-  // 4. Phân tích từng dòng để tách Heading
   let lines = rawText.split('\n');
   lines.forEach(line => {
     line = line.trim();
@@ -456,7 +461,6 @@ function citeCard(c) {
     
     if (line.startsWith('#')) {
       let content = line.replace(/^#+\s*/, '');
-      // Tìm cụm in đậm **...** trong tiêu đề
       let boldMatch = content.match(/\*\*(.*?)\*\*/);
       
       if (boldMatch) {
@@ -464,7 +468,6 @@ function citeCard(c) {
         if (h1) headings.push(h1);
         headings.push(boldMatch[1].trim());
         
-        // Phần chữ phía sau ** bắt buộc phải giữ lại làm Body
         let rest = content.substring(boldMatch.index + boldMatch[0].length).trim();
         if (rest) bodyParts.push(rest);
       } else {
@@ -487,15 +490,9 @@ function citeCard(c) {
     }
   });
 
-  // 5. Làm sạch Body (Giữ nguyên Markdown để hàm richText xử lý)
   let bodyText = bodyParts.join('\n\n').trim();
-  
-  // Tự động thêm dấu ... nếu câu bị cắt cụt
-  if (bodyText && !/[.!?;:]$/.test(bodyText)) {
-    bodyText += '...';
-  }
+  if (bodyText && !/[.!?;:]$/.test(bodyText)) bodyText += '...';
 
-  // Render Heading
   if (headings.length > 0) {
     const hDiv = document.createElement('div');
     hDiv.className = 'cite-heading';
@@ -503,17 +500,12 @@ function citeCard(c) {
     el.appendChild(hDiv);
   }
 
-  // Render Body
   const s = document.createElement('div'); 
   s.className = 's collapsed';
-  
-  // SỬ DỤNG richText ĐỂ HỖ TRỢ KATEX VÀ BULLET POINTS
   const dummyMsg = { citations: [] };
   richText(s, bodyText, dummyMsg);
-  
   el.appendChild(s);
 
-  // 6. Kiểm tra tràn dòng
   const toggleBtn = document.createElement('button');
   toggleBtn.className = 'cite-toggle-btn';
   toggleBtn.innerHTML = 'Xem thêm <svg class="i" style="width:12px;height:12px;"><use href="#i-chevron"/></svg>';

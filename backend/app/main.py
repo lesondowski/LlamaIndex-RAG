@@ -7,7 +7,7 @@ from app.routers import upload, query
 
 
 # Khởi tạo ứng dụng. `title` hiển thị trong tài liệu tự sinh tại /docs (Swagger UI).
-app = FastAPI(title="Financial RAG")
+app = FastAPI(title="Hỏi đáp Sách Giáo Khoa RAG")
 app.add_middleware(
     CORSMiddleware,
     # Origin là bộ ba giao thức + host + cổng của TRANG WEB gửi request (không phải của API).

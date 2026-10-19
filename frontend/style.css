@@ -150,12 +150,37 @@ textarea::placeholder { color: var(--text-tertiary); }
 .cite:hover { background: var(--bg-elevated); }
 
 /* Tầng 1: Header */
+/* Tầng 1: Header */
 .cite .top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.cite .n { width: 22px; height: 22px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-hover); font: 600 11px/22px var(--mono); text-align: center; }
-.cite .pg { font-family: var(--font); font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
-.pdf-btn { margin-left: auto; width: 24px; height: 24px; }
+.cite .n { flex: none; width: 22px; height: 22px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-hover); font: 600 11px/22px var(--mono); text-align: center; }
+
+/* Tên file (Truncate) */
+.cite .fname {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cite .pg { flex: none; font-family: var(--font); font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+.pdf-btn { flex: none; width: 24px; height: 24px; margin-left: 0; }
 .pdf-btn:hover { background: var(--bg-canvas); color: var(--accent-hover); }
 
+/* Chip hiển thị nguồn dưới câu trả lời */
+.chip .chip-src {
+  font-weight: 500;
+  color: var(--text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  display: inline-block;
+}
 /* Tầng 2: Heading (Tiêu đề in đậm) */
 .cite-heading { 
   font-size: 13.5px; 

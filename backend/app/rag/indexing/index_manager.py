@@ -6,8 +6,10 @@ không an toàn với multi-writer (yêu cầu chạy uvicorn 1 worker).
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
+import uuid
 from functools import lru_cache
 
 from llama_index.core import Settings, VectorStoreIndex
@@ -27,10 +29,7 @@ from app.rag.types import FILE_ID, FILE_NAME, PAGE, QueryScope
 log = logging.getLogger(__name__)
 
 INGEST_BATCH_SIZE = 64
-
-# Metadata được phép hiển thị cho LLM khi tổng hợp câu trả lời (tránh gây nhiễu)
 _LLM_VISIBLE_KEYS = (FILE_NAME, PAGE)
-
 _TOP_K_MIN, _TOP_K_MAX = 1, 10
 
 
@@ -39,9 +38,7 @@ class IndexingError(RuntimeError):
 
 
 def _validate_top_k(top_k: int) -> None:
-    """Chặn bool trước int: trong Python, isinstance(True, int) là True.
-    Nếu không chặn, top_k=True sẽ bị ép thành top_k=1 và lọt qua validate.
-    """
+    """Chặn bool trước int: trong Python, isinstance(True, int) là True."""
     if (
         isinstance(top_k, bool)
         or not isinstance(top_k, int)
@@ -53,16 +50,13 @@ def _validate_top_k(top_k: int) -> None:
 
 
 class IndexManager:
-    """Quản lý vòng đời vector index và thao tác ghi/đọc/xóa.
-
-    Index được khởi tạo trễ ở lần dùng đầu tiên (lazy initialization).
-    """
+    """Quản lý vòng đời vector index và thao tác ghi/đọc/xóa."""
 
     def __init__(self) -> None:
         self._index: VectorStoreIndex | None = None
         self._embed = None
-        self._init_lock = threading.Lock()    # Bảo vệ quá trình khởi tạo (double-check)
-        self._write_lock = threading.Lock()   # Serialize ghi/xóa (Chroma 1 writer)
+        self._init_lock = threading.Lock()
+        self._write_lock = threading.Lock()
 
     def _ensure_ready(self) -> None:
         """Load embed model + index một lần (fast path + lock + double-check)."""
@@ -83,23 +77,13 @@ class IndexManager:
 
     @staticmethod
     def _build_filters(file_ids: list[str] | None) -> MetadataFilters | None:
-        """Filter theo file_id (đường cũ). Caller mới nên dùng scope."""
         if not file_ids:
             return None
         if len(file_ids) == 1:
-            return MetadataFilters(filters=[
-                MetadataFilter(key=FILE_ID, value=file_ids[0], operator=FilterOperator.EQ),
-            ])
-        return MetadataFilters(filters=[
-            MetadataFilter(key=FILE_ID, value=list(file_ids), operator=FilterOperator.IN),
-        ])
+            return MetadataFilters(filters=[MetadataFilter(key=FILE_ID, value=file_ids[0], operator=FilterOperator.EQ)])
+        return MetadataFilters(filters=[MetadataFilter(key=FILE_ID, value=list(file_ids), operator=FilterOperator.IN)])
 
-    def _resolve_filters(
-        self,
-        file_ids: list[str] | None,
-        scope: QueryScope | None,
-    ) -> MetadataFilters | None:
-        """Chọn đường filter; chặn việc truyền cả hai tham số cùng lúc."""
+    def _resolve_filters(self, file_ids: list[str] | None, scope: QueryScope | None) -> MetadataFilters | None:
         if scope is not None and file_ids is not None:
             raise ValueError("Chỉ truyền một trong hai: file_ids hoặc scope")
         if scope is not None:
@@ -107,39 +91,29 @@ class IndexManager:
         return self._build_filters(file_ids)
 
     def ingest_nodes(self, nodes: list[BaseNode], file_id: str, file_name: str) -> int:
-        """Gắn metadata và ghi chunks vào Chroma. Trả về số chunk đã ghi.
-
-        Cơ chế Idempotent: node.id_ được tạo tất định từ file_id + index.
-        Nếu ghi đè, các chunk cũ của file_id sẽ bị xóa trước khi ghi chunk mới.
-        """
+        """Gắn metadata và ghi đè toàn bộ chunks vào Chroma (Full Ingestion)."""
         if not nodes:
             raise IndexingError("Không có chunk nào để index.")
 
         self._ensure_ready()
 
-        # Thiếu page metadata thì không thể tạo citation -> Dừng trước khi ghi vector.
         for node in nodes:
             if node.metadata.get(PAGE) is None:
-                raise IndexingError(
-                    "Node thiếu page metadata; không thể bảo đảm citation."
-                )
+                raise IndexingError("Node thiếu page metadata; không thể bảo đảm citation.")
 
         for i, node in enumerate(nodes):
-            node.id_ = f"{file_id}_{i:05d}"   # ID tất định -> re-index sẽ ghi đè
+            node.id_ = f"{file_id}_{i:05d}"
             node.metadata[FILE_ID] = file_id
             node.metadata[FILE_NAME] = file_name
             node.metadata["source"] = file_name
 
-            # Ẩn metadata khỏi text embed (tránh nhiễu); LLM chỉ thấy file_name + page.
             keys = list(node.metadata.keys())
             node.excluded_embed_metadata_keys = keys
-            node.excluded_llm_metadata_keys = [
-                k for k in keys if k not in _LLM_VISIBLE_KEYS
-            ]
+            node.excluded_llm_metadata_keys = [k for k in keys if k not in _LLM_VISIBLE_KEYS]
 
         with self._write_lock:
             try:
-                vs.delete_by_file_id(file_id)   # Xóa chunk cũ (nếu có)
+                vs.delete_by_file_id(file_id)
                 for start in range(0, len(nodes), INGEST_BATCH_SIZE):
                     batch = nodes[start:start + INGEST_BATCH_SIZE]
                     self._index.insert_nodes(batch)
@@ -153,96 +127,127 @@ class IndexManager:
 
         return len(nodes)
 
-    def update_metadata(self, file_id: str, new_tags: dict) -> int:
-        """Cập nhật metadata trực tiếp trên Chroma mà KHÔNG re-embed.
+    def incremental_reindex_nodes(self, new_nodes: list[BaseNode], file_id: str, file_name: str) -> dict:
+        """Cập nhật tài liệu thông minh (Incremental Re-index).
         
-        Rất hữu ích khi người dùng chỉ muốn sửa tag (subject, grade, ...).
-        Tiết kiệm 100% chi phí gọi API Gemini Embedding.
+        Thuật toán Diffing (So sánh mã Hash):
+        - Giữ nguyên ID & Vector của các chunk không đổi nội dung (tiết kiệm chi phí API).
+        - Chỉ gọi Gemini Embed cho các chunk bị sửa đổi hoặc thêm mới.
+        - Xóa các chunk cũ không còn tồn tại trong file mới (dọn rác).
         """
+        if not new_nodes:
+            raise IndexingError("Không có chunk nào để re-index.")
+
+        self._ensure_ready()
+        collection = vs.get_collection()
+
+        # 1. Lấy dữ liệu cũ từ ChromaDB
+        old_data = collection.get(where={"file_id": file_id}, include=["documents"])
+        old_ids = old_data.get("ids", [])
+        old_docs = old_data.get("documents", [])
+        
+        # 2. Tạo Map: MD5(Nội dung cũ) -> ID cũ
+        old_hash_to_id = {}
+        for i, doc_text in enumerate(old_docs):
+            if doc_text:
+                h = hashlib.md5(doc_text.strip().encode('utf-8')).hexdigest()
+                old_hash_to_id[h] = old_ids[i]
+
+        new_ids_to_keep = set()
+        nodes_to_embed = []
+        
+        # 3. Phân tích Diffing
+        for node in new_nodes:
+            current_hash = hashlib.md5(node.text.strip().encode('utf-8')).hexdigest()
+            
+            node.metadata[FILE_ID] = file_id
+            node.metadata[FILE_NAME] = file_name
+            node.metadata["source"] = file_name
+            keys = list(node.metadata.keys())
+            node.excluded_embed_metadata_keys = keys
+            node.excluded_llm_metadata_keys = [k for k in keys if k not in _LLM_VISIBLE_KEYS]
+
+            if current_hash in old_hash_to_id:
+                # NỘI DUNG KHÔNG ĐỔI -> Giữ lại Vector cũ
+                reused_id = old_hash_to_id[current_hash]
+                new_ids_to_keep.add(reused_id)
+                # Cập nhật lại metadata (phòng trường hợp user đổi tag Môn/Lớp)
+                collection.update(ids=[reused_id], metadatas=[node.metadata])
+            else:
+                # NỘI DUNG MỚI/SỬA -> Cần gọi API Embed
+                # Dùng uuid sinh ID mới để tránh xung đột với ID cũ đang giữ
+                node.id_ = f"{file_id}_{uuid.uuid4().hex[:8]}" 
+                nodes_to_embed.append(node)
+
+        # 4. Tìm các ID cũ cần xóa (có trong file cũ nhưng không có trong file mới)
+        ids_to_delete = list(set(old_ids) - new_ids_to_keep)
+
+        # 5. Thực thi ghi/xóa an toàn
         with self._write_lock:
             try:
-                # Gọi hàm vector_store để cập nhật thẳng vào ChromaDB
-                updated_count = vs.update_metadata_by_file_id(file_id, new_tags)
-                log.info("Đã cập nhật metadata cho %s chunk của file_id=%s", updated_count, file_id)
-                return updated_count
+                if ids_to_delete:
+                    collection.delete(ids=ids_to_delete)
+                
+                if nodes_to_embed:
+                    for start in range(0, len(nodes_to_embed), INGEST_BATCH_SIZE):
+                        batch = nodes_to_embed[start:start + INGEST_BATCH_SIZE]
+                        self._index.insert_nodes(batch)
             except Exception as exc:
-                log.exception("Cập nhật metadata thất bại cho file_id=%s", file_id)
+                log.exception("Incremental re-index thất bại — dọn dẹp chunk mới")
+                try:
+                    if nodes_to_embed:
+                        rollback_ids = [n.id_ for n in nodes_to_embed]
+                        collection.delete(ids=rollback_ids)
+                except Exception:
+                    log.exception("Rollback dọn dẹp thất bại")
+                raise IndexingError(f"Không thể cập nhật tài liệu: {exc}") from exc
+
+        return {
+            "total_chunks": len(new_nodes),
+            "kept_chunks": len(new_ids_to_keep),
+            "embedded_chunks": len(nodes_to_embed),
+            "deleted_chunks": len(ids_to_delete)
+        }
+
+    def update_metadata(self, file_id: str, new_tags: dict) -> int:
+        """Cập nhật nhãn trực tiếp vào Chroma, KHÔNG gọi lại Embed API."""
+        with self._write_lock:
+            try:
+                return vs.update_metadata_by_file_id(file_id, new_tags)
+            except Exception as exc:
                 raise IndexingError(f"Không thể cập nhật metadata: {exc}") from exc
 
     def delete_by_file_id(self, file_id: str) -> int:
-        """Xóa mọi chunk của file_id. Trả về số chunk đã xóa.
-
-        Không cần embed model — chỉ gọi Chroma API, nên có thể chạy offline.
-        """
+        """Xóa mọi chunk của file_id khỏi ChromaDB."""
         with self._write_lock:
             try:
                 return vs.delete_by_file_id(file_id)
             except Exception as exc:
-                raise IndexingError(
-                    f"Không thể xóa chunk của {file_id}: {exc}"
-                ) from exc
+                raise IndexingError(f"Không thể xóa chunk của {file_id}: {exc}") from exc
 
-    def query(
-        self,
-        question: str,
-        top_k: int = 5,
-        file_ids: list[str] | None = None,
-        scope: QueryScope | None = None,
-    ) -> list:
-        """Truy hồi top-k node gần nhất với câu hỏi.
-
-        scope và file_ids loại trừ nhau — truyền cả hai sẽ raise ValueError.
-        """
+    def query(self, question: str, top_k: int = 5, file_ids: list[str] | None = None, scope: QueryScope | None = None) -> list:
         _validate_top_k(top_k)
-
-        # Dựng filter TRƯỚC khi load embed: 
-        # Nếu scope sai, báo lỗi ngay, không tốn chi phí gọi API Gemini.
         filters = self._resolve_filters(file_ids, scope)
         self._ensure_ready()
 
         try:
-            retriever = self._index.as_retriever(
-                similarity_top_k=top_k,
-                filters=filters,
-            )
+            retriever = self._index.as_retriever(similarity_top_k=top_k, filters=filters)
             return retriever.retrieve(question)
         except Exception as exc:
             raise IndexingError(f"Truy xuất thất bại: {exc}") from exc
 
-    def as_retriever(
-        self,
-        top_k: int = 5,
-        file_ids: list[str] | None = None,
-        scope: QueryScope | None = None,
-    ) -> BaseRetriever:
-        """Trả về retriever native của LlamaIndex, chưa chạy query.
-
-        Dùng khi cần ghép nối với Query Engine nâng cao (reranking, v.v.).
-        """
+    def as_retriever(self, top_k: int = 5, file_ids: list[str] | None = None, scope: QueryScope | None = None) -> BaseRetriever:
         _validate_top_k(top_k)
-
         filters = self._resolve_filters(file_ids, scope)
         self._ensure_ready()
-
-        return self._index.as_retriever(
-            similarity_top_k=top_k,
-            filters=filters,
-        )
+        return self._index.as_retriever(similarity_top_k=top_k, filters=filters)
 
 
-# ----------------------------------------------------------------------
-# Singleton accessors
-# ----------------------------------------------------------------------
 @lru_cache(maxsize=1)
 def get_index_manager() -> IndexManager:
-    """Trả về đúng 1 instance dùng chung cho toàn process (Thread-safe)."""
     return IndexManager()
 
-
 def __getattr__(name: str):
-    """Tương thích ngược cho `from ...index_manager import index_manager`.
-    Nhờ PEP 562, instance chỉ được tạo khi thực sự gọi tới.
-    """
     if name == "index_manager":
         return get_index_manager()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

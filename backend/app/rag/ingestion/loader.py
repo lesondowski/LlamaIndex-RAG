@@ -127,13 +127,13 @@ class PDFLoader:
             encoding="utf-8",
         )
 
-    def split_double_page_spread(self, input_pdf: str, output_pdf: str, ratio_threshold: float = 1.25): 
+    def split_double_page_spread(self, input_pdf: str, output_pdf: str, ratio_threshold: float = 1.25):
         """
         Cắt pdf có double page
         """
 
         src = pymupdf.open(input_pdf)
-        dst = pymupdf.open()   
+        dst = pymupdf.open()
 
         page_map = []
 
@@ -161,7 +161,6 @@ class PDFLoader:
                         "source_pdf_page": page_idx + 1,
                         "side": side,
                         "logical_page": len(page_map) + 1,
-
                     }) # tạo trang mới + setup kích thước
 
             else:
@@ -192,12 +191,12 @@ class PDFLoader:
 
         if not api_key:
             raise ValueError( "Chưa setup API KEY LLAMAINDEX.")
-    
+
         path = self._validate_pdf_path(path_pdf)
         resolved_document_id = (document_id or path.stem)
         print(f"PDF: {path}")
         print(f"Document ID: {resolved_document_id}")
-        try: 
+        try:
             reader = LlamaParse(api_key=api_key,result_type="markdown",verbose=True,)
 
             parsed_documents = reader.load_data(str(path))
@@ -211,11 +210,11 @@ class PDFLoader:
         print(f"LlamaParse returned {len(parsed_documents)} document(s).")
         if not parsed_documents:
             raise RuntimeError("LlamaParse không trả về Document nào.")
-        
+
         if markdown_output is not None:
             output_path = Path(markdown_output)
             output_path.parent.mkdir(parents=True,exist_ok=True,)
-            
+
             markdown_parts = []
 
             for doc in parsed_documents:
@@ -228,9 +227,8 @@ class PDFLoader:
                     "nhưng tất cả Document đều không có nội dung."
                 )
 
-        markdown_text = "\n\n---\n\n".join(markdown_parts)
-
-        output_path.write_text(markdown_text,encoding="utf-8",)
+            markdown_text = "\n\n---\n\n".join(markdown_parts)
+            output_path.write_text(markdown_text,encoding="utf-8",)
 
         final_documents: list[Document] = []
 
@@ -261,4 +259,3 @@ class PDFLoader:
         if not final_documents:
             raise RuntimeError("LlamaParse không tạo được Document có nội dung.")
         return final_documents
-
