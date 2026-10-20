@@ -35,37 +35,53 @@ async function loadExistingFiles() {
   try {
     list = await api.listFiles();
   } catch (e) {
-    // Không toast ở đây: health-check phía trên đã báo "Không thể kết nối máy chủ"
-    // nếu backend thật sự không phản hồi - tránh 2 thông báo lỗi trùng ý cùng lúc.
     console.error('[App] load existing files error', e);
     return;
   }
 
   for (const item of list) {
     const id = uid('file');
-    state.files.set(id, {
+    
+    // Map trạng thái từ Backend sang Frontend
+    let mappedStatus = 'saved';
+    if (item.status === 'indexed') mappedStatus = 'ready';
+    else if (item.status === 'processing') mappedStatus = 'processing';
+
+    const fileObj = {
       id,
       name: item.name,
       size: item.size,
       type: 'application/pdf',
-      status: item.status === 'indexed' ? 'ready' : 'saved',
-      progress: 100,
-      selected: item.status === 'indexed',
+      status: mappedStatus,
+      progress: mappedStatus === 'ready' ? 100 : 50, // Nếu đang processing, cho thanh chạy 50%
+      selected: mappedStatus === 'ready' || mappedStatus === 'saved', 
       blob: null,
-      serverId: item.file_id
-    });
+      serverId: item.file_id,
+      message: mappedStatus === 'processing' ? 'Đang xử lý ngầm...' : ''
+    };
+    
+    state.files.set(id, fileObj);
+
+    // Nếu phát hiện file đang xử lý dở (VD: user F5 trang), tự động gọi Polling tiếp
+    if (mappedStatus === 'processing') {
+      pollFileStatus(fileObj, item.file_id);
+    }
   }
   renderFiles();
 }
 
 // Map status -> function sinh label hiển thị
-// uploading cần tham số f để lấy progress
 const STATUS_LABEL = {
   uploading: f => 'Đang tải lên... ' + f.progress + '%',
-  processing: () => 'Đang xử lý...',
+  processing: f => {
+    // Dựa vào % tiến trình để đưa ra thông điệp thân thiện
+    if (f.progress < 20) return 'Đang đọc tài liệu...';
+    if (f.progress < 80) return 'Đang xử lý nội dung...';
+    return 'Sắp hoàn tất...';
+  },
   ready: () => 'Sẵn sàng',
   saved: () => 'Đã lưu',
-  error: () => 'Không thể tải file'
+  error: () => 'Lỗi xử lý file'
 };
 
 function renderFiles() {
@@ -81,15 +97,16 @@ function renderFiles() {
   
   allFiles().forEach(f => {
     const el = document.createElement('div'); el.className = 'src ' + f.status;
-    if (f.status === 'ready') {
+    
+    if (f.status === 'ready' || f.status === 'saved') {
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.selected;
       cb.onchange = () => { f.selected = cb.checked; renderFiles(); };
       el.appendChild(cb);
     }
+    
     const mid = document.createElement('div'); mid.className = 'mid';
     const nm = document.createElement('div'); nm.className = 'nm'; nm.title = f.name; nm.textContent = f.name;
     
-    // Sử dụng STATUS_LABEL
     const ss = document.createElement('span'); 
     ss.className = 'stt ' + f.status; 
     const label = STATUS_LABEL[f.status] ? STATUS_LABEL[f.status](f) : f.status;
@@ -97,9 +114,17 @@ function renderFiles() {
     
     mid.append(nm, ss); el.appendChild(mid);
     
-    if (f.status === 'uploading' || f.status === 'processing') {
+    // Thanh tiến trình (hiển thị khi upload hoặc processing)
+        if (f.status === 'uploading' || f.status === 'processing') {
       const bar = document.createElement('div'); bar.className = 'bar busy';
-      bar.innerHTML = `<i style="width:${f.progress}%"></i>`; mid.appendChild(bar);
+      if (f.status === 'uploading') {
+        // Đang tải file lên: chạy đúng % thực tế
+        bar.innerHTML = `<i style="width:${f.progress}%"></i>`; 
+      } else {
+        // Đang xử lý ngầm: chạy hiệu ứng vô định
+        bar.innerHTML = `<i class="indeterminate"></i>`; 
+      }
+      mid.appendChild(bar);
     }
 
     const x = document.createElement('button'); x.className = 'icon-btn x'; x.innerHTML = ico('x');
@@ -108,8 +133,15 @@ function renderFiles() {
       e.stopPropagation();
       if (f.abort) f.abort(); 
       if (f.serverId) {
-        try { await api.deleteFile(f.serverId); } 
-        catch (err) { toast('Không xóa được trên máy chủ, đã ẩn khỏi giao diện.', 'warn'); }
+        try { 
+          await api.deleteFile(f.serverId); 
+          toast('Đã xóa tài liệu.');
+        } 
+        catch (err) { 
+          console.error('Delete failed:', err);
+          toast('Không xóa được: ' + err.message, 'err'); 
+          return; 
+        }
       }
       state.files.delete(f.id); renderFiles(); 
     };
@@ -140,19 +172,11 @@ $('scrim').onclick = () => { setCitesOpen(false, true); setSrcOpen(false); };
 
 // ================= KEYBOARD SHORTCUTS =================
 document.addEventListener('keydown', e => {
-  // Ctrl/Cmd + B -> toggle panel Trích dẫn
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-    e.preventDefault();
-    setCitesOpen(!citesOpen(), true);
-    return;
+    e.preventDefault(); setCitesOpen(!citesOpen(), true); return;
   }
-
-  // Escape
   if (e.key === 'Escape') {
-    // Nếu đang stream -> ưu tiên Dừng trước
     if (state.sending) { stopGen(); return; }
-
-    // Ngược lại: đóng drawer nếu đang mở
     if (innerWidth <= 1200 && citesOpen()) setCitesOpen(false, true);
     setSrcOpen(false);
   }
@@ -178,10 +202,82 @@ async function addFiles(list) {
 function startUpload(id) {
   const f = state.files.get(id); if (!f) return;
   Object.assign(f, { status: 'uploading', progress: 0 }); renderFiles();
-  const h = api.uploadFile(f.blob, { onProgress: p => { f.progress = p; renderFiles(); }, onProcessing: () => { f.status = 'processing'; renderFiles(); } });
+  
+  const h = api.uploadFile(f.blob, { 
+    onProgress: p => { f.progress = p; renderFiles(); }, 
+    onProcessing: () => { f.status = 'processing'; f.message = 'Đang chờ xử lý...'; renderFiles(); } 
+  });
+  
   f.abort = h.abort;
-  h.promise.then(r => { f.status = 'ready'; f.serverId = r.id; renderFiles(); toast('Tải lên thành công.'); })
-   .catch(e => { if (e.name === 'AbortError') return; f.status = 'error'; renderFiles(); });
+  
+  h.promise.then(r => { 
+    // SỬA LỖI: api.js mới trả về r.file_id thay vì r.id
+    f.serverId = r.file_id; 
+    f.status = 'processing'; 
+    f.message = r.message || 'Đang xử lý ngầm...';
+    renderFiles(); 
+    
+    // Bắt đầu Polling liên tục để cập nhật trạng thái từ Background Task
+    pollFileStatus(f, r.file_id);
+  })
+   .catch(e => { 
+     if (e.name === 'AbortError') return; 
+     f.status = 'error'; 
+     f.message = e.message || 'Lỗi upload';
+     renderFiles(); 
+   });
+}
+
+// Hàm Polling: Hỏi thăm Backend mỗi 1.5 giây
+async function pollFileStatus(f, serverId) {
+  let attempts = 0;
+  const maxAttempts = 80; // ~2 phút timeout (đề phòng file lớn parse lâu)
+
+  const check = async () => {
+    // Dừng polling nếu file đã xong hoặc bị lỗi, hoặc bị xóa khỏi UI
+    if (f.status === 'ready' || f.status === 'error' || !state.files.has(f.id)) return;
+
+    try {
+      const res = await api.getFileStatus(serverId);
+      
+      f.message = res.message || 'Đang xử lý...';
+      
+      if (res.status === 'indexed') {
+        f.status = 'ready';
+        f.progress = 100;
+        f.selected = true; // Tự động chọn khi xong
+        renderFiles();
+        toast(`Tài liệu "${f.name}" đã sẵn sàng!`);
+        return;
+      }
+      
+      if (res.status === 'error') {
+        f.status = 'error';
+        renderFiles();
+        toast(`Lỗi xử lý "${f.name}": ${res.message}`, 'err');
+        return;
+      }
+      
+      // Cập nhật UI nếu vẫn đang processing
+      renderFiles();
+      
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(check, 1500);
+      } else {
+        f.status = 'error'; 
+        f.message = 'Quá thời gian xử lý.';
+        renderFiles(); 
+        toast('Quá thời gian xử lý tài liệu.', 'err');
+      }
+      
+    } catch (e) {
+      // Nếu mất mạng tạm thời, thử lại sau 3s
+      setTimeout(check, 3000); 
+    }
+  };
+  
+  check();
 }
 
 const scrollToBottom = () => { const c = $('chat-container'); c.scrollTop = c.scrollHeight; };

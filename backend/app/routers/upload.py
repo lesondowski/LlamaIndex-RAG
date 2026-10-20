@@ -1,10 +1,11 @@
 """Route upload: nhận PDF, validate, lưu trữ, index kèm metadata.
 
 Endpoints:
-  POST   /upload                     — upload file mới & index
+  POST   /upload                     — upload file mới & index (chạy ngầm)
   POST   /files/{file_id}/reindex    — cập nhật file thông minh (Incremental)
   PATCH  /files/{file_id}/metadata   — cập nhật tag (không embed lại)
   GET    /files                      — liệt kê tài liệu
+  GET    /files/{file_id}/status     — lấy trạng thái xử lý (Polling)
   DELETE /files/{file_id}            — xóa tài liệu + vector
 """
 import json
@@ -14,12 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+import pymupdf
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import BaseNode
+from pydantic import BaseModel
 
 from app.config import MAX_FILE_SIZE, UPLOAD_DIR
 from app.rag.indexing.index_manager import IndexingError, get_index_manager
@@ -33,6 +35,14 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 READ_CHUNK_BYTES = 1024 * 1024  # 1 MB
 
+# ============================================================================
+# LƯU TRỮ TRẠNG THÁI TẠM THỜI (IN-MEMORY STATE)
+# ============================================================================
+# Cấu trúc: { file_id: {"status": "processing", "progress": 10, "message": "..."} }
+# LƯU Ý: Trong môi trường Production thực tế, nên dùng Redis hoặc Database
+# thay vì lưu trong RAM để đảm bảo không mất dữ liệu khi server restart.
+UPLOAD_PROGRESS = {}
+
 
 # ============================================================================
 # Helpers: File Paths & Metadata
@@ -40,27 +50,21 @@ READ_CHUNK_BYTES = 1024 * 1024  # 1 MB
 def _pdf_path(file_id: str) -> Path:
     return UPLOAD_DIR / f"{file_id}.pdf"
 
-
 def _meta_path(file_id: str) -> Path:
     return UPLOAD_DIR / f"{file_id}.json"
-
 
 def _meta_tmp_path(file_id: str) -> Path:
     return _meta_path(file_id).with_suffix(".json.tmp")
 
-
 def _write_meta(file_id: str, metadata: dict) -> None:
-    """Ghi metadata atomic: .json.tmp -> rename.
-    Đảm bảo file .json luôn ở trạng thái hoàn chỉnh, không bị đọc dở nếu GET /files chạy xen giữa.
-    """
+    """Ghi metadata atomic: .json.tmp -> rename."""
     target = _meta_path(file_id)
     tmp = _meta_tmp_path(file_id)
     tmp.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(target)
 
-
 def _read_meta(file_id: str) -> dict:
-    """Đọc sidecar JSON, dùng utf-8-sig để bỏ qua BOM (nếu có)."""
+    """Đọc sidecar JSON, dùng utf-8-sig để bỏ qua BOM."""
     try:
         data = json.loads(_meta_path(file_id).read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
@@ -76,23 +80,35 @@ def _validate_pdf_header(head: bytes) -> None:
     if head != b"%PDF-":
         raise HTTPException(400, "File không phải PDF hợp lệ.")
 
+def _validate_pdf_structure(pdf_path: Path) -> None:
+    """Kiểm tra file PDF có cấu trúc hợp lệ và có ít nhất 1 trang."""
+    try:
+        doc = pymupdf.open(str(pdf_path))
+        if doc.page_count == 0:
+            doc.close()
+            raise HTTPException(400, "File PDF không có trang nào (File rỗng).")
+        doc.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.warning(f"Lỗi validate PDF {pdf_path.name}: {e}")
+        raise HTTPException(400, f"File PDF bị lỗi cấu trúc hoặc không đúng định dạng: {e}")
 
-async def _save_upload_file(file: UploadFile, dest_path: Path) -> int:
-    """Đọc stream từ UploadFile, kiểm tra giới hạn và ghi an toàn ra đĩa.
-    
-    Cơ chế:
-      - Ghi ra file `.part` trước, sau đó rename thành file chính thức.
-      - Giới hạn `MAX_FILE_SIZE` để tránh tấn công từ chối dịch vụ (DoS).
-      - Tự động dọn dẹp file `.part` nếu có lỗi xảy ra.
-      
-    Returns:
-        Kích thước file (bytes) đã ghi thành công.
-    """
+async def _save_upload_file(file: UploadFile, dest_path: Path, head: bytes) -> int:
+    """Đọc stream từ UploadFile, ghi an toàn ra đĩa (bao gồm cả 5 bytes header)."""
     pdf_tmp = dest_path.with_suffix(".part")
+<<<<<<< HEAD
     size = pdf_tmp.stat().st_size
 
     try:
         with pdf_tmp.open("ab") as out:
+=======
+    size = len(head)
+
+    try:
+        with pdf_tmp.open("wb") as out:
+            out.write(head)
+>>>>>>> origin/hnnnhu
             while chunk := await file.read(READ_CHUNK_BYTES):
                 size += len(chunk)
                 if size > MAX_FILE_SIZE:
@@ -128,7 +144,7 @@ def _build_nodes(
         source_metadata = dict(document.metadata or {})
         page = source_metadata.get("page")
         if page is None:
-            raise ValueError("LlamaParse không trả page metadata.")
+            raise ValueError("Không trích xuất được metadata trang (page).")
         try:
             page = int(page)
         except (TypeError, ValueError) as exc:
@@ -159,25 +175,74 @@ def _build_nodes(
         node.metadata["chunk_index"] = index
     return nodes
 
-
 def _parse_pdf_to_nodes(
     pdf_path: Path, file_id: str, display_name: str, tags: DocumentTags | None = None
 ) -> list[BaseNode]:
-    """Chạy LlamaParse và chunking (chạy trong threadpool để không block event loop)."""
+    """Try LlamaParse first, fallback to unstructured partition PDF."""
     from app.rag.ingestion.loader import PDFLoader
-    documents = PDFLoader().load_llama_parse(
-        path_pdf=str(pdf_path), markdown_output=None, document_id=file_id
-    )
+    loader = PDFLoader()
+    documents = []
+    
+    try:
+        log.info(f"Đang parse bằng LlamaParse: {display_name}")
+        documents = loader.load_llama_parse(
+            path_pdf=str(pdf_path), markdown_output=None, document_id=file_id
+        )
+    except Exception as e:
+        log.warning(f"LlamaParse failed: {e}. Chuyển sang fallback unstructured.")
+        
     if not documents:
-        raise HTTPException(422, "LlamaParse không trích xuất được nội dung từ PDF.")
+        try:
+            log.info(f"Đang parse bằng Unstructured: {display_name}")
+            documents = loader.load_partition_pdf(
+                file_path=str(pdf_path), document_id=file_id
+            )
+        except Exception as e:
+            raise HTTPException(422, f"LlamaParse và unstructured đều thất bại: {e}")
+            
+    if not documents:
+        raise HTTPException(422, "Không thể trích xuất nội dung từ PDF (LlamaParse & Unstructured đều thất bại).")
+        
     nodes = _build_nodes(documents, file_id, display_name, tags)
     if not nodes:
         raise HTTPException(422, "PDF không tạo được chunk có nội dung.")
     return nodes
 
-
 def available_file_ids() -> set[str]:
     return {pdf.stem for pdf in UPLOAD_DIR.glob("*.pdf") if FILE_ID_RE.fullmatch(pdf.stem)}
+
+
+# ============================================================================
+# HÀM CHẠY NGẦM (BACKGROUND TASK)
+# ============================================================================
+def _process_pdf_background(
+    pdf_path: Path, file_id: str, display_name: str, tags: DocumentTags | None, meta_file: Path
+):
+    try:
+        # 1. Parse PDF
+        UPLOAD_PROGRESS[file_id] = {"status": "processing", "progress": 10, "message": "Đang đọc và phân tích tài liệu..."}
+        log.info(f"[Background] Bắt đầu parse PDF cho {file_id}")
+        
+        nodes = _parse_pdf_to_nodes(pdf_path, file_id, display_name, tags)
+        
+        # 2. Chunking & Embedding
+        # Thay đổi message ở đây để thân thiện với người dùng
+        UPLOAD_PROGRESS[file_id] = {"status": "processing", "progress": 50, "message": "Đang cấu trúc lại dữ liệu..."}
+        # Terminal vẫn log chi tiết kỹ thuật
+        log.info(f"[Background] Đã chunk xong {len(nodes)} nodes. Bắt đầu đẩy vào ChromaDB.")
+        
+        chunks = get_index_manager().ingest_nodes(nodes, file_id, display_name)
+        
+        # 3. Hoàn tất
+        UPLOAD_PROGRESS[file_id] = {"status": "indexed", "progress": 100, "message": "Sẵn sàng!"}
+        log.info(f"[Background] Hoàn tất xử lý {display_name}: {chunks} chunks.")
+    except Exception as exc:
+        log.exception(f"[Background] Lỗi xử lý file {file_id}: {exc}")
+        UPLOAD_PROGRESS[file_id] = {"status": "error", "progress": 100, "message": str(exc)}
+        
+        # Rollback: Xóa file PDF và JSON nếu xử lý thất bại
+        pdf_path.unlink(missing_ok=True)
+        meta_file.unlink(missing_ok=True)
 
 
 # ============================================================================
@@ -191,10 +256,11 @@ class MetadataUpdateRequest(BaseModel):
 
 
 # ============================================================================
-# POST /upload (Full Ingest)
+# POST /upload (Bất đồng bộ + BackgroundTasks)
 # ============================================================================
 @router.post("/upload")
 async def upload_pdf(
+    background_tasks: BackgroundTasks, # <-- Inject BackgroundTasks
     file: UploadFile = File(...),
     override_file_id: Optional[str] = Form(None),
     subject: Optional[str] = Form(None),
@@ -228,18 +294,28 @@ async def upload_pdf(
 
     # 1. Ghi file an toàn
     try:
+<<<<<<< HEAD
         # Đã đọc 5 bytes, cần ghi nốt 5 bytes đó trước khi ghi tiếp
         with dest.with_suffix(".part").open("wb") as out:
             out.write(head)
         size = await _save_upload_file(file, dest)
+=======
+        size = await _save_upload_file(file, dest, head)
+>>>>>>> origin/hnnnhu
     except BaseException as exc:
-        for leftover in (dest.with_suffix(".part"), dest):
-            leftover.unlink(missing_ok=True)
+        dest.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(500, f"Lỗi khi ghi file: {exc}")
 
-    # 2. Ghi metadata
+    # 2. Validate PDF cấu trúc
+    try:
+        _validate_pdf_structure(dest)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
+
+    # 3. Ghi metadata sơ bộ
     meta = {
         "file_id": file_id, "name": display_name, "size": size,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
@@ -247,30 +323,36 @@ async def upload_pdf(
     }
     _write_meta(file_id, meta)
 
-    # 3. Parse & Ingest
-    try:
-        nodes = await run_in_threadpool(_parse_pdf_to_nodes, dest, file_id, display_name, tags)
-        chunks = await run_in_threadpool(
-            get_index_manager().ingest_nodes, nodes, file_id, display_name
-        )
-    except BaseException as exc:
-        # Rollback nếu index thất bại (xóa file PDF và JSON)
-        for leftover in (dest, meta_file):
-            leftover.unlink(missing_ok=True)
-        if isinstance(exc, HTTPException):
-            raise
-        if isinstance(exc, IndexingError):
-            log.error("Index thất bại cho %s: %s", display_name, exc, exc_info=True)
-            raise HTTPException(503, f"Không thể xử lý tài liệu: {exc}")
-        log.exception("Lỗi không lường trước khi ingest %s", display_name)
-        raise HTTPException(500, "Lỗi nội bộ khi xử lý tài liệu.")
+    # 4. Khởi tạo trạng thái ban đầu và đẩy vào Background Tasks
+    UPLOAD_PROGRESS[file_id] = {"status": "processing", "progress": 5, "message": "Đang chờ xử lý..."}
+    background_tasks.add_task(_process_pdf_background, dest, file_id, display_name, tags, meta_file)
 
-    log.info("Upload thành công: %s (%d chunks)", display_name, chunks)
-    return {"file_id": file_id, "name": display_name, "size": size, "chunks": chunks, **tags.to_metadata()}
+    # Trả về ngay lập tức cho Frontend (không bắt Frontend chờ đợi)
+    log.info(f"Đã nhận file {display_name} (ID: {file_id}). Đang xử lý ngầm...")
+    return {"file_id": file_id, "status": "processing", "message": "Đã nhận file, đang xử lý."}
 
 
 # ============================================================================
-# POST /files/{file_id}/reindex (Incremental Update)
+# GET /files/{file_id}/status (Polling Endpoint)
+# ============================================================================
+@router.get("/files/{file_id}/status")
+def get_file_status(file_id: str):
+    """Trả về tiến trình xử lý file hiện tại."""
+    if not FILE_ID_RE.fullmatch(file_id):
+        raise HTTPException(400, "file_id không hợp lệ.")
+        
+    status = UPLOAD_PROGRESS.get(file_id)
+    if not status:
+        # Nếu server bị restart (mất RAM), nhưng file đã có trên đĩa -> coi như đã index xong
+        if _pdf_path(file_id).is_file():
+            return {"status": "indexed", "progress": 100, "message": "Sẵn sàng"}
+        raise HTTPException(404, "Không tìm thấy tiến trình xử lý.")
+        
+    return status
+
+
+# ============================================================================
+# POST /files/{file_id}/reindex (Đồng bộ - Giữ nguyên logic an toàn)
 # ============================================================================
 @router.post("/files/{file_id}/reindex")
 async def incremental_reindex(
@@ -289,10 +371,11 @@ async def incremental_reindex(
     old_meta = _read_meta(file_id)
     
     if not pdf_path.is_file():
-        raise HTTPException(404, "Không tìm thấy tài liệu gốc.")
+        raise HTTPException(404, "Không tìm thấy tài liệu gốc để cập nhật.")
 
-    # 1. Nếu có file mới, ghi đè và cập nhật display_name
     display_name = old_meta.get("name", pdf_path.name)
+    temp_pdf = pdf_path.with_suffix(".pdf.tmp")
+    
     if file:
         name = file.filename or ""
         if not name.lower().endswith(".pdf"):
@@ -301,25 +384,27 @@ async def incremental_reindex(
         head = await file.read(5)
         _validate_pdf_header(head)
 
-        # Tạo lại file .part và ghi đè
-        with pdf_path.with_suffix(".part").open("wb") as out:
-            out.write(head)
-        
         try:
+<<<<<<< HEAD
             new_size = await _save_upload_file(file, pdf_path)
+=======
+            new_size = await _save_upload_file(file, temp_pdf, head)
+>>>>>>> origin/hnnnhu
             old_meta["size"] = new_size
         except BaseException as exc:
-            pdf_path.with_suffix(".part").unlink(missing_ok=True)
-            if isinstance(exc, HTTPException):
-                raise
+            temp_pdf.unlink(missing_ok=True)
+            if isinstance(exc, HTTPException): raise
             raise HTTPException(500, f"Lỗi khi ghi file mới: {exc}")
         
-        # Cập nhật tên hiển thị nếu user đổi tên file
+        try:
+            _validate_pdf_structure(temp_pdf)
+        except HTTPException:
+            temp_pdf.unlink(missing_ok=True)
+            raise
+
         display_name = name.replace("\\", "/").rsplit("/", 1)[-1]
         old_meta["name"] = display_name
 
-    # 2. Xử lý Metadata: Phân biệt None (giữ cũ) vs "" (xóa)
-    # Dùng `is not None` để bắt được trường hợp client gửi chuỗi rỗng ""
     final_subject = subject if subject is not None else old_meta.get(SUBJECT)
     final_grade = grade if grade is not None else old_meta.get(GRADE)
     final_series = series if series is not None else old_meta.get(SERIES)
@@ -328,26 +413,33 @@ async def incremental_reindex(
     try:
         tags = DocumentTags.from_input(final_subject, final_grade, final_series, final_volume)
     except MetadataError as exc:
+        if file: temp_pdf.unlink(missing_ok=True)
         raise HTTPException(422, str(exc)) from None
 
-    # 3. Parse & Incremental Ingest
+    target_pdf = temp_pdf if file else pdf_path
+    
     try:
-        nodes = await run_in_threadpool(_parse_pdf_to_nodes, pdf_path, file_id, display_name, tags)
+        nodes = await run_in_threadpool(_parse_pdf_to_nodes, target_pdf, file_id, display_name, tags)
+        
+        if file:
+            if pdf_path.exists(): pdf_path.unlink()
+            temp_pdf.replace(pdf_path)
+            
         stats = await run_in_threadpool(
             get_index_manager().incremental_reindex_nodes, nodes, file_id, display_name
         )
     except IndexingError as exc:
+        if file: temp_pdf.unlink(missing_ok=True)
         log.error("Incremental reindex thất bại cho %s: %s", file_id, exc, exc_info=True)
-        raise HTTPException(503, f"Lỗi khi cập nhật tài liệu: {exc}")
+        raise HTTPException(503, f"Lỗi khi cập nhật vector: {exc}")
     except Exception as exc:
+        if file: temp_pdf.unlink(missing_ok=True)
         log.exception("Lỗi parse PDF khi reindex %s", file_id)
-        raise HTTPException(500, f"Lỗi khi parse PDF: {exc}")
+        raise HTTPException(422, f"File mới bị lỗi khi parse, file cũ được giữ nguyên: {exc}")
 
-    # 4. Cập nhật Metadata JSON (Đồng bộ cả tag và xóa tag nếu cần)
     new_meta = tags.to_metadata()
     old_meta.update(new_meta)
     
-    # Xóa các key không còn giá trị trong JSON để đồng bộ tuyệt đối với ChromaDB
     for key in (SUBJECT, GRADE, SERIES, VOLUME):
         if key not in new_meta:
             old_meta.pop(key, None)
@@ -361,11 +453,11 @@ async def incremental_reindex(
 
 
 # ============================================================================
-# PATCH /files/{file_id}/metadata (Chỉ cập nhật Tag, không embed lại)
+# PATCH /files/{file_id}/metadata
 # ============================================================================
 @router.patch("/files/{file_id}/metadata")
 def update_file_metadata(file_id: str, req: MetadataUpdateRequest):
-    """Cập nhật nhãn (subject, grade...) trực tiếp vào ChromaDB và JSON, không cần re-index."""
+    """Cập nhật nhãn trực tiếp vào ChromaDB và JSON, không cần re-index."""
     if not FILE_ID_RE.fullmatch(file_id):
         raise HTTPException(400, "file_id không hợp lệ.")
     
@@ -404,12 +496,16 @@ def list_files():
         if not FILE_ID_RE.fullmatch(file_id):
             continue
 
+        # Ưu tiên lấy trạng thái thời gian thực từ RAM, nếu không có thì coi là 'indexed'
+        current_status = UPLOAD_PROGRESS.get(file_id, {}).get("status", "indexed")
+
         meta = _read_meta(file_id)
         stat = pdf.stat()
         items.append({
             "file_id": file_id,
             "name": meta.get("name") or f"{file_id[:8]}.pdf",
             "size": stat.st_size,
+            "status": current_status,
             "uploaded_at": meta.get("uploaded_at")
                            or datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
             **{key: meta[key] for key in (SUBJECT, GRADE, SERIES, VOLUME) if key in meta},
@@ -417,7 +513,6 @@ def list_files():
     
     items.sort(key=lambda item: item["uploaded_at"])
     return {"files": items}
-
 
 @router.delete("/files/{file_id}", status_code=204)
 def delete_file(file_id: str):
@@ -430,8 +525,8 @@ def delete_file(file_id: str):
     try:
         removed = get_index_manager().delete_by_file_id(file_id)
     except Exception as e:
-        log.exception("Không xóa được vector của %s", file_id)
-        raise HTTPException(503, f"Không xóa được dữ liệu index: {e}")
+        log.exception("Không xóa được vector của %s, sẽ tiếp tục xóa file vật lý", file_id)
+        removed = 0 
 
     if not pdf.is_file() and removed == 0:
         raise HTTPException(404, "Không tìm thấy tài liệu.")
@@ -439,6 +534,9 @@ def delete_file(file_id: str):
     try:
         pdf.unlink(missing_ok=True)
         _meta_path(file_id).unlink(missing_ok=True)
+        pdf.with_suffix(".pdf.tmp").unlink(missing_ok=True)
+        # Dọn dẹp luôn trạng thái trong RAM nếu có
+        UPLOAD_PROGRESS.pop(file_id, None)
     except OSError as e:
         log.error("Không xóa được file vật lý của %s: %s", file_id, e)
         raise HTTPException(500, f"Không xóa được file: {e}")

@@ -239,6 +239,16 @@ textarea::placeholder { color: var(--text-tertiary); }
 .toast.err { border-left-color: var(--danger); }
 .scrim { display: none; }
 
+/* Thanh tiến trình chạy vô định khi không xác định được % */
+.bar.busy i.indeterminate {
+  width: 30% !important;
+  animation: indeterminate 1.5s infinite linear;
+}
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
 /* Confirm nút Xóa */
 .icon-btn.armed { color: var(--danger); background: rgba(229,100,92,.12); padding: 0 8px; width: auto; gap: 4px; font-size: 12px; font-weight: 500; }
 
