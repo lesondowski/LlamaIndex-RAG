@@ -19,6 +19,7 @@ dependencies = [
     "pymupdf",
     "llama-index-embeddings-google-genai",
     "llama-index-llms-google-genai",
+    "httpx>=0.28,<1",
 ]
 
 [build-system]

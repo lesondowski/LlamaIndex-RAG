@@ -89,10 +89,10 @@ async def _save_upload_file(file: UploadFile, dest_path: Path) -> int:
         Kích thước file (bytes) đã ghi thành công.
     """
     pdf_tmp = dest_path.with_suffix(".part")
-    size = 0
+    size = pdf_tmp.stat().st_size
 
     try:
-        with pdf_tmp.open("wb") as out:
+        with pdf_tmp.open("ab") as out:
             while chunk := await file.read(READ_CHUNK_BYTES):
                 size += len(chunk)
                 if size > MAX_FILE_SIZE:
@@ -231,7 +231,7 @@ async def upload_pdf(
         # Đã đọc 5 bytes, cần ghi nốt 5 bytes đó trước khi ghi tiếp
         with dest.with_suffix(".part").open("wb") as out:
             out.write(head)
-        size = len(head) + await _save_upload_file(file, dest)
+        size = await _save_upload_file(file, dest)
     except BaseException as exc:
         for leftover in (dest.with_suffix(".part"), dest):
             leftover.unlink(missing_ok=True)
@@ -306,7 +306,7 @@ async def incremental_reindex(
             out.write(head)
         
         try:
-            new_size = len(head) + await _save_upload_file(file, pdf_path)
+            new_size = await _save_upload_file(file, pdf_path)
             old_meta["size"] = new_size
         except BaseException as exc:
             pdf_path.with_suffix(".part").unlink(missing_ok=True)

@@ -1,4 +1,6 @@
 import logging
+import os
+from chromadb.errors import NotFoundError
 from functools import lru_cache
 
 import chromadb
@@ -11,8 +13,9 @@ from app.rag.indexing.embeddings import embed_model_id
 log = logging.getLogger(__name__)
 CHROMA_DIR = BASE_DIR / "storage" / "chroma_db"
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-COLLECTION_NAME = "SGKCTST"
-
+COLLECTION_NAME = os.getenv(
+    "CHROMA_COLLECTION", "SGKCTST"
+).strip()
 
 class EmbeddingModelMismatchError(RuntimeError):
     """Collection đã lưu vector của model embedding khác với model hiện tại."""
@@ -30,44 +33,41 @@ def get_collection():
     nhanh hơn so với việc tính khoảng cách với toàn bộ vector.
     các vector được xếp hạng dựa trên khoảng cách cosine.
     """
+
+    if not COLLECTION_NAME: 
+        raise ValueError("CHROMA_COLLECTION không được để trống.")
+
+    
     model_id = embed_model_id()
-    collection = _get_client().get_or_create_collection(
-        COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine", "embed_model": model_id}, #     cấu hình HNSW với metric cosine.
-    )
+    client = _get_client()
+    try: 
+        collection = client.get_collection(
+            COLLECTION_NAME,
+            embedding_function=None, #     cấu hình HNSW với metric cosine.
+        )
+    except NotFoundError:
+        collection = client.create_collection(
+            COLLECTION_NAME,
+            embedding_function=None,
+            metadata={
+                "hnsw:space": "cosine",
+                "embed_model": model_id,
+            },
+        )        
     metadata = collection.metadata or {}
-    stored_model_id = metadata.get("embed_model")
-    stored_distance = metadata.get("hnsw:space")
-    if stored_model_id is None:
-        if collection.count() > 0:
-            raise EmbeddingModelMismatchError(
-                f"Collection {COLLECTION_NAME!r} đã có vector nhưng thiếu "
-                "embedding fingerprint; cần xác minh/rebuild thủ công."
-            )
-
-        if stored_distance not in (None, "cosine"):
-            raise EmbeddingModelMismatchError(
-                f"Collection rỗng nhưng distance là {stored_distance!r}; "
-                "hãy tạo collection mới để dùng cosine."
-            )
-
-        collection.modify(
-            metadata={"hnsw:space": "cosine", "embed_model": model_id}
-        )
-        metadata = collection.metadata or {}
-        stored_model_id = metadata.get("embed_model")
-        stored_distance = metadata.get("hnsw:space")
-
-        
-    if stored_model_id != model_id:
+    if metadata.get("embed_model") != model_id:
         raise EmbeddingModelMismatchError(
-            f"Collection đang dùng {stored_model_id!r}, còn cấu hình hiện tại là {model_id!r} Cần dùng lại model cũ hoặc rebuild index.")
-
-    if stored_distance != "cosine":
-        raise EmbeddingModelMismatchError(
-            f"Collection đang dùng distance {stored_distance!r}, không phải "
-            "'cosine'. Cần tạo collection mới và index lại."
+            f"Collection {COLLECTION_NAME!r}: "
+            f"stored={metadata.get('embed_model')!r}, "
+            f"expected={model_id!r}. "
+            "Hãy chọn collection riêng cho model mới."
         )
+
+    if metadata.get("hnsw:space") != "cosine":
+        raise EmbeddingModelMismatchError(
+            "Collection không dùng cosine."
+        )
+
     return collection
 
 
