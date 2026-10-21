@@ -75,3 +75,26 @@ def test_tags_reach_every_node_without_none_values():
 def test_metadata_options_lists_the_whitelist(client):
     options = client.get("/metadata/options").json()
     assert "vat_ly" in options["subjects"] and options["grade"] == {"min": 1, "max": 12}
+
+
+def test_build_nodes_splits_markdown_sections_and_preserves_pages_and_tags():
+    documents = [
+        Document(
+            text="# Mục một\n\nNội dung thứ nhất.\n\n# Mục hai\n\nNội dung thứ hai.",
+            metadata={"page": 1},
+        ),
+        Document(text="# Mục ba\n\nNội dung thứ ba.", metadata={"page": 2}),
+    ]
+    tags = upload.DocumentTags.from_input(subject="vat_ly", grade=12)
+
+    nodes = upload._build_nodes(documents, "a" * 32, "Vật lý 12.pdf", tags)
+
+    assert len(nodes) == 3
+    assert [node.metadata["page"] for node in nodes] == [1, 1, 2]
+    assert [node.metadata["chunk_index"] for node in nodes] == [0, 1, 2]
+    for node in nodes:
+        assert node.metadata["file_id"] == "a" * 32
+        assert node.metadata["subject"] == "vat_ly"
+        assert node.metadata["grade"] == 12
+    assert "Nội dung thứ nhất." in nodes[0].text
+    assert "Nội dung thứ hai." not in nodes[0].text

@@ -1,9 +1,9 @@
+import argparse
 import json
 import math
 import time
 from pathlib import Path
 from dotenv import load_dotenv
-from app.rag.retrieval.retriever import Retriever
 
 
 # Chroma integration test, Đo top-k trên index hiện có
@@ -42,12 +42,28 @@ def load_dataset(path: Path) -> list[dict]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Đánh giá dense retrieval trên Chroma hiện có.")
+    parser.add_argument("--limit", type=int, help="Chỉ chạy N câu đầu để kiểm tra nhanh.")
+    args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit phải lớn hơn 0")
+    print("Đang nạp cấu hình và thư viện retrieval...", flush=True)
     script_path = Path(__file__).resolve()
     repo_root = script_path.parents[2]
     load_dotenv(repo_root / ".env")
 
-    dataset_path = repo_root / "backend" / "evaluation" / "dense_retrieval_pdf.jsonl"
+    # Nạp cấu hình trước khi import: vector_store đọc collection lúc import.
+    from app.rag.retrieval.retriever import Retriever
+
+    dataset_path = repo_root / "backend" / "evaluation" / "retrieval_pdf.jsonl"
     rows = load_dataset(dataset_path)
+    if args.limit is not None:
+        rows = rows[:args.limit]
+    print(
+        f"Dataset: {dataset_path}\n"
+        f"Số câu: {len(rows)}; số lượt retrieval: {len(rows) * len(TOP_K_VALUES)}",
+        flush=True,
+    )
     retriever = Retriever()
 
     metrics = {
@@ -60,10 +76,12 @@ def main() -> None:
         for top_k in TOP_K_VALUES
     }
 
-    for row in rows:
+    for question_index, row in enumerate(rows, start=1):
+        print(f"[{question_index}/{len(rows)}] {row['question']}", flush=True)
         relevant_pages = {int(page) for page in row["relevant_pages"]}
 
         for top_k in TOP_K_VALUES:
+            print(f"  top_k={top_k}: đang truy hồi (gồm gọi API embedding)...", flush=True)
             started = time.perf_counter()
             results = retriever.retrieve(
                 question=row["question"],
@@ -71,6 +89,7 @@ def main() -> None:
                 file_ids=row["file_ids"],
             )
             elapsed_ms = (time.perf_counter() - started) * 1000
+            print(f"  Nhận {len(results)} chunks sau {elapsed_ms / 1000:.2f}s", flush=True)
 
             ranked_pages = [
                 result.node.metadata.get("page")
