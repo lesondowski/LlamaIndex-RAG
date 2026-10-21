@@ -97,18 +97,11 @@ def _validate_pdf_structure(pdf_path: Path) -> None:
 async def _save_upload_file(file: UploadFile, dest_path: Path, head: bytes) -> int:
     """Đọc stream từ UploadFile, ghi an toàn ra đĩa (bao gồm cả 5 bytes header)."""
     pdf_tmp = dest_path.with_suffix(".part")
-<<<<<<< HEAD
-    size = pdf_tmp.stat().st_size
-
-    try:
-        with pdf_tmp.open("ab") as out:
-=======
     size = len(head)
 
     try:
         with pdf_tmp.open("wb") as out:
             out.write(head)
->>>>>>> origin/hnnnhu
             while chunk := await file.read(READ_CHUNK_BYTES):
                 size += len(chunk)
                 if size > MAX_FILE_SIZE:
@@ -294,14 +287,7 @@ async def upload_pdf(
 
     # 1. Ghi file an toàn
     try:
-<<<<<<< HEAD
-        # Đã đọc 5 bytes, cần ghi nốt 5 bytes đó trước khi ghi tiếp
-        with dest.with_suffix(".part").open("wb") as out:
-            out.write(head)
-        size = await _save_upload_file(file, dest)
-=======
         size = await _save_upload_file(file, dest, head)
->>>>>>> origin/hnnnhu
     except BaseException as exc:
         dest.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
@@ -385,11 +371,7 @@ async def incremental_reindex(
         _validate_pdf_header(head)
 
         try:
-<<<<<<< HEAD
-            new_size = await _save_upload_file(file, pdf_path)
-=======
             new_size = await _save_upload_file(file, temp_pdf, head)
->>>>>>> origin/hnnnhu
             old_meta["size"] = new_size
         except BaseException as exc:
             temp_pdf.unlink(missing_ok=True)
