@@ -1,4 +1,30 @@
+import re
+
 from llama_index.core.schema import NodeWithScore
+
+EXCERPT_CHARS = 1200
+
+
+def clean_excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
+    """[AI] Đoạn trích hiển thị ở panel "Trích dẫn từ sách".
+
+    GIỮ xuống dòng: PDF được LlamaParse đọc thành markdown, bảng / danh sách / tiêu đề phải đúng
+    từng dòng mới hiển thị được (trước đây gộp hết thành một dòng → bảng thành chuỗi
+    "| x | t | --- | 0 | 25 |" dính vào tiêu đề). Chỉ gọn khoảng trắng trong từng dòng, cắt ở
+    ranh giới dòng (không cắt đôi hàng của bảng) và không cắt dở công thức $...$.
+    """
+    lines = [" ".join(line.split()) for line in str(text).splitlines()]
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    if len(out) <= limit:
+        return out
+    cut = out.rfind("\n", 0, limit)
+    if cut < limit // 2:            # dòng cuối quá dài → cắt ở ranh giới từ
+        cut = out.rfind(" ", 0, limit)
+    out = out[:cut if cut > 0 else limit].rstrip()
+    for mark in ("$$", "$"):        # số dấu $ lẻ = đang cắt giữa công thức → lùi về trước công thức đó
+        if out.count(mark) % 2:
+            out = out[:out.rfind(mark)].rstrip()
+    return out
 
 
 def build_citations(source_nodes: list[NodeWithScore]) -> list[dict]:
@@ -42,7 +68,7 @@ def build_citations(source_nodes: list[NodeWithScore]) -> list[dict]:
         # Ưu tiên original_excerpt (text SẠCH); fallback về get_content() nếu thiếu
         excerpt = metadata.get("original_excerpt")
         if excerpt is None:
-            excerpt = " ".join(node.get_content().split())[:2000]
+            excerpt = clean_excerpt(node.get_content())
 
         citations.append({
             "id": citation_id,

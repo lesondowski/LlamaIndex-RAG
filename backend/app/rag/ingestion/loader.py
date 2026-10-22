@@ -197,7 +197,7 @@ class PDFLoader:
         print(f"PDF: {path}")
         print(f"Document ID: {resolved_document_id}")
         try:
-            reader = LlamaParse(api_key=api_key,result_type="markdown",verbose=True,ignore_errors=False)
+            reader = LlamaParse(api_key=api_key,result_type="markdown",verbose=False,ignore_errors=False)
 
             parsed_documents = reader.load_data(str(path))
         except Exception as exc:

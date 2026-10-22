@@ -1,16 +1,27 @@
 """Hợp đồng request cho endpoint /query/stream.
 
-Hai nhóm trường:
+Ba nhóm trường:
   - Câu hỏi: question, top_k
   - Phạm vi lọc: file_ids, subject, grade, series, page_from, page_to
+  - Lịch sử hội thoại: history (để viết lại câu hỏi nối tiếp — xem rag/generation/condense.py)
 
 Nguyên tắc: schema chỉ chuẩn hóa cú pháp (strip, whitelist, kiểu số). Ngữ nghĩa
 phạm vi — file_id có tồn tại không, page range có hợp lệ với số sách đã chọn
 không — do resolve_scope xử lý, vì nó cần thêm available_file_ids.
 """
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.rag.types import MetadataError, normalize_series, normalize_subject
+
+
+class ChatTurn(BaseModel):
+    """Một tin nhắn trước đó trong hội thoại. [AI]"""
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=20_000)
 
 
 class QueryRequest(BaseModel):
@@ -36,6 +47,10 @@ class QueryRequest(BaseModel):
     # "trang 45" của Toán 9 không cùng nghĩa với "trang 45" của Lý 12.
     page_from: int | None = Field(default=None, ge=1)
     page_to: int | None = Field(default=None, ge=1)
+
+    # [AI] Các tin nhắn trước câu hỏi này, cũ → mới. Lịch sử lưu ở trình duyệt nên client
+    # tự gửi kèm; server chỉ dùng vài tin cuối để viết lại câu hỏi nối tiếp.
+    history: list[ChatTurn] = Field(default_factory=list, max_length=20)
 
     @field_validator("question")
     @classmethod
