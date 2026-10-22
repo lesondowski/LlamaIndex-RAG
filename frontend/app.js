@@ -2,7 +2,9 @@ const { CONFIG, validateFile } = api;
 const $ = id => document.getElementById(id);
 
 const state = {
-  files: new Map(), messages: [], sending: false, cites: [], userToggled: false, seq: 0, mode: 'checking', srcOpen: true
+  files: new Map(), messages: [], sending: false, cites: [], userToggled: false, seq: 0, mode: 'checking', srcOpen: true,
+  // Bộ đếm lần tải danh sách tài liệu: lần tải mới hơn thì bỏ kết quả của lần cũ.
+  filesSeq: 0
 };
 
 const uid = p => p + '-' + String(++state.seq).padStart(3, '0');
@@ -10,6 +12,7 @@ const ico = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`
 const allFiles = () => [...state.files.values()];
 const readyFiles = () => allFiles().filter(f => f.status === 'ready');
 const refOf = f => f.serverId ?? f.id;
+const selectedIds = () => readyFiles().filter(f => f.selected).map(refOf);
 
 function toast(msg, type = 'ok', ttl = 4500, title) {
   const el = document.createElement('div'); el.className = 'toast ' + (type === 'ok' ? '' : type);
@@ -31,6 +34,7 @@ if (!CONFIG.USE_MOCK) {
 
 // ================= LOAD & RENDER FILES =================
 async function loadExistingFiles() {
+  const seq = ++state.filesSeq;
   let list = [];
   try {
     list = await api.listFiles();
@@ -38,6 +42,7 @@ async function loadExistingFiles() {
     console.error('[App] load existing files error', e);
     return;
   }
+  if (seq !== state.filesSeq) return;   // đã có lần tải mới hơn → bỏ kết quả này
 
   for (const item of list) {
     const id = uid('file');
@@ -161,8 +166,14 @@ const citesOpen = () => $('layout').classList.contains('cites-open');
 function setSrcOpen(open) {
   state.srcOpen = open;
   $('layout').classList.toggle('src-closed', !open);
+  // ≤860px cột trái là ngăn kéo phủ lên khung chat, CSS mở nó bằng class src-open.
+  $('layout').classList.toggle('src-open', open);
   $('show-src-btn').style.display = open ? 'none' : 'inline-grid';
 }
+// Đổi cỡ màn hình qua mốc 860px (thu nhỏ cửa sổ, xoay tablet): màn hẹp thì đóng ngăn kéo để
+// hiện nút mở, màn rộng thì mở lại thanh bên — không để thanh bên biến mất mà không có nút mở.
+const narrowScreen = matchMedia('(max-width: 860px)');
+narrowScreen.addEventListener('change', e => setSrcOpen(!e.matches));
 
 $('cites-toggle').onclick = () => setCitesOpen(!citesOpen(), true);
 $('cites-close').onclick = () => setCitesOpen(false, true);
@@ -220,8 +231,8 @@ function startUpload(id) {
     // Bắt đầu Polling liên tục để cập nhật trạng thái từ Background Task
     pollFileStatus(f, r.file_id);
   })
-   .catch(e => { 
-     if (e.name === 'AbortError') return; 
+   .catch(e => {
+     if (e.name === 'AbortError') return;
      f.status = 'error'; 
      f.message = e.message || 'Lỗi upload';
      renderFiles(); 
@@ -273,7 +284,7 @@ async function pollFileStatus(f, serverId) {
       
     } catch (e) {
       // Nếu mất mạng tạm thời, thử lại sau 3s
-      setTimeout(check, 3000); 
+      setTimeout(check, 3000);
     }
   };
   
@@ -283,28 +294,53 @@ async function pollFileStatus(f, serverId) {
 const scrollToBottom = () => { const c = $('chat-container'); c.scrollTop = c.scrollHeight; };
 
 // ================= MARKDOWN & KATEX PARSER =================
+// [AI] Chữ đến từ LLM và từ PDF người dùng tải lên → chỉ giữ vài thẻ định dạng an toàn, bỏ mọi
+// thuộc tính; thẻ lạ (<img onerror>, <script>, <iframe>...) bị bỏ, chỉ giữ chữ bên trong.
+const SAFE_TAGS = new Set(['SUP', 'SUB', 'B', 'STRONG', 'I', 'EM', 'U', 'BR']);
+const HAS_SAFE_TAG = /<\/?(sup|sub|b|strong|i|em|u|br)\b[^>]*>/i;
+
+// [AI] Chuẩn hóa dấu trích dẫn: "[3, 4, 5]", "[1], [2]", "[1] [2]" → "[3][4][5]" (một cụm liền) và
+// bỏ khoảng trắng trước cụm để số dính vào chữ. KHÔNG đẩy dấu câu lên trước số trích dẫn: trước đây
+// "đời sống [4]. Đạo hàm" bị đổi thành "đời sống. [4] Đạo hàm" → dấu chấm và số lệch sang câu sau.
+function normalizeCites(text) {
+  return text
+    .replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, ns) => ns.split(/\s*,\s*/).map(n => `[${n}]`).join(''))
+    .replace(/(\[\d+\])(?:\s*,\s*|\s+)(?=\[\d+\])/g, '$1')
+    .replace(/[ \t]+(?=\[\d+\])/g, '');
+}
+
 function renderRichInline(parent, text, m) {
-  text = text.replace(/\s*\[(\d+)\]\s*([.,:;!?])/g, '$2[$1]').replace(/\s+\[(\d+)\]/g, '[$1]');
+  if (m.citations.length) text = normalizeCites(text);
+  if (!HAS_SAFE_TAG.test(text)) { renderInline(parent, text, m); return; }
 
-  if (/<[a-z]+>/i.test(text)) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(`<div>${text}</div>`, 'text/html');
-    const childNodes = Array.from(doc.body.firstChild.childNodes);
-    
-    childNodes.forEach(node => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        processTextNode(node.textContent);
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName === 'SUP') {
-          const sup = document.createElement('sup'); sup.textContent = node.textContent; parent.appendChild(sup);
-        } else { parent.appendChild(node.cloneNode(true)); }
-      }
-    });
-  } else {
-    processTextNode(text);
+  const doc = new DOMParser().parseFromString(`<div>${text}</div>`, 'text/html');
+  const walk = (src, dst) => src.childNodes.forEach(node => {
+    if (node.nodeType === Node.TEXT_NODE) renderInline(dst, node.textContent, m);
+    else if (node.nodeType === Node.ELEMENT_NODE) {
+      if (!SAFE_TAGS.has(node.tagName)) { walk(node, dst); return; }
+      const el = document.createElement(node.tagName); walk(node, el); dst.appendChild(el);
+    }
+  });
+  walk(doc.body.firstChild, parent);
+}
+
+// [AI] Gói từ đứng ngay trước (hoặc công thức / chữ đậm ngắn) cùng các số trích dẫn vào một khung
+// không xuống dòng → số trích dẫn không bị rớt một mình sang dòng mới.
+function citeGlue(parent) {
+  const last = parent.lastChild;
+  if (last && last.nodeType === Node.ELEMENT_NODE && last.classList.contains('cite-glue')) return last;
+  const glue = document.createElement('span'); glue.className = 'cite-glue';
+  if (last && last.nodeType === Node.TEXT_NODE) {
+    const w = /\S+$/.exec(last.textContent);
+    if (w) { last.textContent = last.textContent.slice(0, w.index); glue.append(w[0]); }
+  } else if (last && last.nodeType === Node.ELEMENT_NODE && last.textContent.length <= 30) {
+    glue.appendChild(last);
   }
+  parent.appendChild(glue);
+  return glue;
+}
 
-  function processTextNode(txt) {
+function renderInline(parent, txt, m) {
     const parts = txt.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|`[^`\n]+`|\*(?!\s)[^*\n]+?(?<!\s)\*|\[\d+\])/);
     parts.forEach(p => {
       if (!p) return; let mm;
@@ -331,12 +367,11 @@ function renderRichInline(parent, text, m) {
           const sup = document.createElement('sup');
           sup.className = 'cite-mark'; sup.textContent = `[${c.id}]`; sup.title = `Xem trích dẫn ${c.id}`;
           sup.onclick = (e) => { e.preventDefault(); showCite(m.citations, c.id); };
-          parent.appendChild(sup);
+          citeGlue(parent).appendChild(sup);
         } else { parent.append(p); }
       }
       else parent.append(p);
     });
-  }
 }
 
 const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
@@ -351,8 +386,18 @@ function richText(b, text, m) {
     if (/^\s*\|/.test(ln) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
       flush(); const head = cells(ln); const rows = []; i += 2;
       while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(cells(lines[i++])); }
-      const wrap = document.createElement('div'); wrap.className = 'tbl';
-      wrap.innerHTML = `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      // [AI] Dựng bảng bằng DOM thay vì innerHTML: ô bảng lấy từ PDF/LLM có thể chứa "<" hoặc thẻ lạ,
+      // và mỗi ô vẫn hiển thị được công thức $...$, chữ đậm, số trích dẫn.
+      const row = (tag, cs) => {
+        const tr = document.createElement('tr');
+        cs.forEach(c => { const td = document.createElement(tag); renderRichInline(td, c, m); tr.appendChild(td); });
+        return tr;
+      };
+      const table = document.createElement('table');
+      const thead = document.createElement('thead'); thead.appendChild(row('th', head));
+      const tbody = document.createElement('tbody'); rows.forEach(r => tbody.appendChild(row('td', r)));
+      table.append(thead, tbody);
+      const wrap = document.createElement('div'); wrap.className = 'tbl'; wrap.appendChild(table);
       b.appendChild(wrap); continue;
     }
     const li = LI.exec(ln);
@@ -444,7 +489,11 @@ function renderMsg(m) {
   else {
     b.textContent = ''; richText(b, m.content, m);
     if (m.status === 'streaming') {
-      const caret = document.createElement('span'); caret.className = 'caret'; b.appendChild(caret);
+      const caret = document.createElement('span'); caret.className = 'caret';
+      // Đặt con trỏ ngay cuối đoạn đang viết, không để nó rơi xuống một dòng riêng.
+      let host = b.lastElementChild;
+      if (host && /^(UL|OL)$/.test(host.tagName)) host = host.lastElementChild;
+      (host && /^(P|LI|H[2-4])$/.test(host.tagName) ? host : b).appendChild(caret);
     } else { buildAfter(m); }
   }
 }
@@ -458,19 +507,32 @@ function editUserMessage(m) {
   $('user-input').dispatchEvent(new Event('input')); 
   $('user-input').focus();
   
-  const toRemove = state.messages.splice(idx); 
+  const toRemove = state.messages.splice(idx);
   toRemove.forEach(msg => { if (msg.el) msg.el.remove(); });
-  
+
   renderCites([]); if (!state.userToggled) setCitesOpen(false);
+}
+
+// [AI] Bộ nhớ hội thoại: các tin đã xong TRƯỚC câu hỏi của m (3 lượt hỏi–đáp gần nhất), gửi kèm
+// để server viết lại câu hỏi nối tiếp như "Còn chu vi của nó?" thành câu tự đủ nghĩa rồi mới tìm.
+// Tính theo vị trí của m nên "Tạo lại" một câu trả lời cũ chỉ lấy các lượt TRƯỚC nó.
+// Không lưu lịch sử: xóa khung chat (nút 🗑) hoặc tải lại trang là bắt đầu lại, không còn ngữ cảnh.
+const HISTORY_MESSAGES = 6;
+function historyBefore(m) {
+  const idx = state.messages.indexOf(m);   // m là câu trả lời, ngay trước nó là câu hỏi
+  return state.messages.slice(0, Math.max(idx - 1, 0))
+    .filter(x => x.status === 'complete' && x.content.trim())
+    .slice(-HISTORY_MESSAGES)
+    .map(x => ({ role: x.role, content: x.content }));
 }
 
 async function run(m) {
   state.sending = true; state.active = m;
   Object.assign(m, { status: 'pending', content: '', citations: [], label: '', errKind: null, errMessage: null, notFound: false });
   renderMsg(m); syncSend(); scrollToBottom();
-  
+
   try {
-    await api.sendChat(m.request, {
+    await api.sendChat({ ...m.request, history: historyBefore(m) }, {
       signal: (m.ctrl = new AbortController()).signal,
       sourceName: id => (allFiles().find(f => refOf(f) === id) || {}).name,
       onStatus: s => { if (m.status === 'pending') { m.label = s; renderMsg(m); } },
@@ -499,9 +561,9 @@ async function run(m) {
       if (!had) { m.status = 'error'; m.errKind = 'abort'; m.content = 'Đã dừng.'; }
       else { m.content = had + ' [Đã dừng]'; }
     }
-    else { 
-      m.status = 'error'; 
-      m.errKind = e.kind; 
+    else {
+      m.status = 'error';
+      m.errKind = e.kind;
       m.errMessage = e.message; 
     }
   } finally {
@@ -509,12 +571,15 @@ async function run(m) {
   }
 }
 
-const retry = m => { if (!state.sending) run(m); };
+const retry = m => {
+  if (state.sending) return;
+  run(m);
+};
 
 function submit(text) {
   if (state.sending) return;
   const q = (text ?? $('user-input').value).trim(); if (!q) return;
-  const ids = readyFiles().filter(f => f.selected).map(refOf);
+  const ids = selectedIds();
   $('user-input').value = ''; $('user-input').style.height = 'auto';
   const u = { id: uid('msg'), role: 'user', content: q, status: 'complete' };
   const a = { id: uid('msg'), role: 'assistant', content: '', status: 'pending', citations: [], request: { message: q, sourceIds: ids } };
@@ -523,6 +588,8 @@ function submit(text) {
 
 function stopGen() { if (state.active && state.active.ctrl) state.active.ctrl.abort(); }
 $('send-btn').onclick = () => state.sending ? stopGen() : submit();
+// Gợi ý câu hỏi ở màn chào: bấm là gửi luôn.
+document.querySelectorAll('.suggestion').forEach(btn => { btn.onclick = () => submit(btn.dataset.q); });
 $('user-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } });
 $('user-input').addEventListener('input', e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px'; syncSend(); });
 const syncSend = () => { const b = $('send-btn'); b.classList.toggle('stop', state.sending); b.disabled = !state.sending && !$('user-input').value.trim(); b.innerHTML = ico(state.sending ? 'stop' : 'arrow-up'); };
@@ -555,13 +622,13 @@ let clearTimer = null;
 const disarmClear = () => { clearTimeout(clearTimer); const b = $('clear-btn'); b.classList.remove('armed'); b.innerHTML = ico('trash'); };
 
 $('clear-btn').onclick = () => {
-  if (state.sending) { if (state.active && state.active.ctrl) state.active.ctrl.abort(); state.sending = false; }
   const b = $('clear-btn');
   if (!b.classList.contains('armed')) { b.classList.add('armed'); b.innerHTML = ico('trash') + '<span>Xóa hết?</span>'; clearTimer = setTimeout(disarmClear, 3000); return; }
-  
-  disarmClear(); state.messages = []; 
+
+  disarmClear(); stopGen(); state.messages = [];
   document.querySelectorAll('#chat-container .message-row:not([data-static])').forEach(n => n.remove());
   renderCites([]); if (!state.userToggled) setCitesOpen(false);
+  $('user-input').focus();
 };
 
 // ================= CITATIONS LOGIC =================
@@ -573,6 +640,50 @@ function showCite(list, n) {
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
   });
+}
+
+// [AI] Làm sạch đoạn trích PDF trước khi hiển thị.
+const EMOJI = /[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}]/gu;
+function cleanExcerpt(raw) {
+  let t = String(raw || '');
+  // Dữ liệu cũ (gộp thành một dòng): tách tiêu đề markdown ra dòng riêng.
+  // [^\n#]: không tách nhầm "##" thành "#" + "# " (sinh tiêu đề rỗng)
+  if (!t.includes('\n')) t = t.replace(/([^\n#])(#{1,6}\s)/g, '$1\n\n$2');
+  return t
+    .replace(/<!--[\s\S]*?-->/g, '')                  // chú thích HTML (đánh dấu trang của LlamaParse)
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '') // khối mã / CSS lẫn trong PDF
+    .replace(/<\/?(?!(?:sup|sub|b|strong|i|em|u|br)\b)[a-z][a-z0-9]*\b(?:\s[^<>]*)?\/?>/gi, '')  // thẻ HTML lạ (giữ chữ)
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')             // ảnh markdown
+    .replace(/^(#{1,6}\s+)[A-ZĐ]\s+(?=\*\*)/gm, '$1') // chữ cái mục lục thuật ngữ: "## G **Giá trị cực đại**"
+    .replace(/^[ \t]*(?:>[ \t]?)+/gm, '')             // dấu trích dẫn khối "> "
+    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '')  // đường kẻ ngang (dòng kẻ của bảng bắt đầu bằng "|" nên không bị đụng)
+    .replace(/#{1,6}\s*[A-Z]$/gm, '')                 // tiêu đề rác chỉ một chữ cái ("## B")
+    .replace(EMOJI, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Tiêu đề ở ĐẦU đoạn trích → dòng tiêu đề của thẻ; tiêu đề nằm giữa → chữ đậm (thẻ nhỏ, không cần h2/h3).
+// LlamaParse đôi khi đánh dấu cả một đoạn văn dài là tiêu đề → dài quá thì coi là đoạn văn thường.
+const HEADING_MAX = 100;
+function splitExcerpt(text) {
+  const lines = text.split('\n'), headings = [];
+  const strip = l => l.trim().replace(/^#+\s*/, '');
+  while (lines.length && (!lines[0].trim() || /^#{1,6}\s/.test(lines[0].trim()))) {
+    const h = strip(lines[0]);
+    if (!h) { lines.shift(); continue; }
+    // Dữ liệu cũ (một dòng): "## **TIÊU ĐỀ** nội dung..." → tách phần in đậm đầu làm tiêu đề
+    const bold = /^\*\*(.+?)\*\*\s+(.{20,})$/.exec(h);
+    if (bold) { lines[0] = bold[2]; headings.push(bold[1].trim()); break; }
+    if (h.replace(/\*\*/g, '').length > HEADING_MAX) { lines[0] = h; break; }
+    headings.push(h.replace(/\*\*/g, '').trim()); lines.shift();
+  }
+  const body = lines.map(l => {
+    if (!/^\s*#{1,6}\s/.test(l)) return l;
+    const h = strip(l).replace(/\*\*/g, '').trim();
+    return h.length > HEADING_MAX ? h : `**${h}**`;
+  }).join('\n').trim();
+  return { headings, body };
 }
 
 function citeCard(c) {
@@ -589,57 +700,18 @@ function citeCard(c) {
   top.append(nSpan, fnameSpan, pgSpan, pdfBtn);
   el.appendChild(top);
 
-  let rawText = c.excerpt || '';
-  rawText = rawText.replace(/#{1,6}\s*[A-Z]$/gm, '').replace(/^---$/gm, '').trim();
-  rawText = rawText.replace(/[\u{1F300}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}]/gu, '');
-  rawText = rawText.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2');
-
-  let headings = [];
-  let bodyParts = [];
-
-  let lines = rawText.split('\n');
-  lines.forEach(line => {
-    line = line.trim();
-    if (!line) return;
-    
-    if (line.startsWith('#')) {
-      let content = line.replace(/^#+\s*/, '');
-      let boldMatch = content.match(/\*\*(.*?)\*\*/);
-      
-      if (boldMatch) {
-        let h1 = content.substring(0, boldMatch.index).replace(/\*\*/g, '').trim();
-        if (h1) headings.push(h1);
-        headings.push(boldMatch[1].trim());
-        
-        let rest = content.substring(boldMatch.index + boldMatch[0].length).trim();
-        if (rest) bodyParts.push(rest);
-      } else {
-        if (content.length > 80) {
-          let breakIndex = content.indexOf('. ', 40);
-          if (breakIndex === -1) breakIndex = content.indexOf(': ', 40);
-          
-          if (breakIndex !== -1) {
-            headings.push(content.substring(0, breakIndex + 1).trim());
-            bodyParts.push(content.substring(breakIndex + 1).trim());
-          } else {
-            headings.push(content);
-          }
-        } else {
-          headings.push(content);
-        }
-      }
-    } else {
-      bodyParts.push(line);
-    }
-  });
-
-  let bodyText = bodyParts.join('\n\n').trim();
-  if (bodyText && !/[.!?;:]$/.test(bodyText)) bodyText += '...';
+  // [AI] Đoạn trích là markdown do LlamaParse đọc từ PDF, giữ nguyên xuống dòng (xem
+  // backend citations.clean_excerpt): tách tiêu đề ở đầu ra dòng riêng, phần còn lại hiển thị
+  // bằng richText (bảng, danh sách, công thức) thay vì một khối chữ dính liền.
+  const { headings, body } = splitExcerpt(cleanExcerpt(c.excerpt));
+  let bodyText = body;
+  // Đoạn trích bị cắt giữa câu → thêm "…" (trừ khi dòng cuối là hàng của bảng)
+  if (bodyText && !/[.!?;:…)\]|]$/.test(bodyText)) bodyText += '…';
 
   if (headings.length > 0) {
     const hDiv = document.createElement('div');
     hDiv.className = 'cite-heading';
-    hDiv.textContent = headings.join(' - ');
+    renderRichInline(hDiv, headings.join(' · '), { citations: [] });   // [AI] tiêu đề có thể chứa công thức $...$
     el.appendChild(hDiv);
   }
 
@@ -657,6 +729,8 @@ function citeCard(c) {
   requestAnimationFrame(() => {
     if (s.scrollHeight <= s.clientHeight + 5) {
       toggleBtn.style.display = 'none';
+    } else {
+      s.classList.add('fade');   // [AI] chỉ làm mờ đáy khi đoạn trích thật sự bị cắt
     }
   });
 
@@ -673,10 +747,22 @@ function renderCites(list) {
   state.cites = list; const box = $('cites'); box.textContent = '';
   $('cite-count').textContent = list.length;
   if (!list.length) {
-    box.innerHTML = `<div class="empty">${ico('book')}<b>Chưa có trích dẫn</b>Các đoạn văn bản liên quan sẽ xuất hiện ở đây.</div>`;
+    box.innerHTML = `<div class="empty">${ico('book')}<b>Chưa có trích dẫn</b>Các đoạn trong sách dùng để trả lời sẽ hiện ở đây, kèm số trang.</div>`;
     return;
   }
   list.forEach(c => box.appendChild(citeCard(c)));
 }
 
-renderCites([]); renderFiles(); setCitesOpen(false);
+// ================= GIAO DIỆN SÁNG / TỐI =================
+// [AI] Phần này viết với sự hỗ trợ của Claude Code.
+// Theme ban đầu đã được gán ngay trong <head> (tránh nháy màu khi tải); ở đây chỉ đổi và nhớ lựa chọn.
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $('theme-btn').innerHTML = ico(theme === 'dark' ? 'sun' : 'moon');
+  $('theme-btn').title = theme === 'dark' ? 'Chuyển sang nền sáng' : 'Chuyển sang nền tối';
+  try { localStorage.setItem('rag.theme', theme); } catch (_) { }
+}
+$('theme-btn').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+
+renderCites([]); renderFiles(); setCitesOpen(false); setSrcOpen(!narrowScreen.matches);
+setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');

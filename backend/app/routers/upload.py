@@ -1,13 +1,3 @@
-"""Route upload: nhận PDF, validate, lưu trữ, index kèm metadata.
-
-Endpoints:
-  POST   /upload                     — upload file mới & index (chạy ngầm)
-  POST   /files/{file_id}/reindex    — cập nhật file thông minh (Incremental)
-  PATCH  /files/{file_id}/metadata   — cập nhật tag (không embed lại)
-  GET    /files                      — liệt kê tài liệu
-  GET    /files/{file_id}/status     — lấy trạng thái xử lý (Polling)
-  DELETE /files/{file_id}            — xóa tài liệu + vector
-"""
 import json
 import logging
 import uuid
@@ -19,13 +9,12 @@ import pymupdf
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from llama_index.core import Document
-from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import BaseNode
 from pydantic import BaseModel
 
 from app.config import MAX_FILE_SIZE, UPLOAD_DIR
 from app.rag.indexing.index_manager import IndexingError, get_index_manager
-from app.rag.ingestion.chunker import CHUNK_OVERLAP, CHUNK_SIZE
+from app.rag.ingestion.chunker import CHUNK_OVERLAP, CHUNK_SIZE, Chunking
 from app.rag.types import (
     FILE_ID_RE, GRADE, SERIES, SUBJECT, VOLUME,
     DocumentTags, MetadataError,
@@ -34,19 +23,8 @@ from app.rag.types import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 READ_CHUNK_BYTES = 1024 * 1024  # 1 MB
-
-# ============================================================================
-# LƯU TRỮ TRẠNG THÁI TẠM THỜI (IN-MEMORY STATE)
-# ============================================================================
-# Cấu trúc: { file_id: {"status": "processing", "progress": 10, "message": "..."} }
-# LƯU Ý: Trong môi trường Production thực tế, nên dùng Redis hoặc Database
-# thay vì lưu trong RAM để đảm bảo không mất dữ liệu khi server restart.
 UPLOAD_PROGRESS = {}
 
-
-# ============================================================================
-# Helpers: File Paths & Metadata
-# ============================================================================
 def _pdf_path(file_id: str) -> Path:
     return UPLOAD_DIR / f"{file_id}.pdf"
 
@@ -71,10 +49,6 @@ def _read_meta(file_id: str) -> dict:
         return {}
     return data if isinstance(data, dict) else {}
 
-
-# ============================================================================
-# Helpers: File I/O & Validation
-# ============================================================================
 def _validate_pdf_header(head: bytes) -> None:
     """Kiểm tra magic bytes: '%PDF-'."""
     if head != b"%PDF-":
@@ -159,10 +133,10 @@ def _build_nodes(
     if not page_documents:
         return []
 
-    splitter = SentenceSplitter(
-        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, paragraph_separator="\n\n"
+    chunker = Chunking(
+        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
     )
-    nodes = splitter.get_nodes_from_documents(page_documents)
+    nodes = chunker.chunk(page_documents)
     nodes = [n for n in nodes if n.text and n.text.strip()]
     for index, node in enumerate(nodes):
         node.metadata["chunk_index"] = index

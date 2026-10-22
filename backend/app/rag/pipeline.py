@@ -17,12 +17,12 @@ def loading(input_pdf: str, output_markdown:str, file_id: str):
     return documents
 
 
-def chunk(documents, output_nodes):
+def chunk(documents, output_nodes, chunk_size=700, chunk_overlap=64):
     print("---------    CHUNK MARKDOWN DOCUMENTS   --------")
     chunker = Chunking(
         output_file=output_nodes,
-        chunk_size=550,
-        chunk_overlap=64,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
     nodes = chunker.chunk(documents)
     if not nodes:
@@ -75,36 +75,31 @@ def retrieval(manager, file_id):
 def main() -> None:
     load_dotenv()
     #Setup Parameter
-    input_pdf = Path("./app/database/data/pdf/2.pdf")
+    folder_pdf = Path("./app/database/data/pdf/")
     output_dir =  Path("./app/database/storage/pipeline_runs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    file_ids = 1
+    pdf_files = sorted(
+        f for f in folder_pdf.rglob("*")
+        if f.is_file() and f.suffix.lower() == ".pdf"
+    )
+    for pdf in pdf_files:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_markdown = (output_dir / f"{pdf.stem}.md")
+        output_nodes = (output_dir / f"{pdf.stem}_nodes.json")
+        print("_" * 70)
+        print("PDF:", pdf.stem)
+        print("File ID:", file_ids)
+        print("Markdown:", output_markdown)
+        print("Nodes:", output_nodes)
+        print("_" * 70)
+        file_ids = str(file_ids)
+        documents = loading(input_pdf=pdf, output_markdown=output_markdown, file_id=file_ids)
+        nodes, chunker = chunk(documents=documents, output_nodes=output_nodes)
+        mnr = embedding(nodes=nodes, chunker=chunker, file_id=file_ids, input_pdf=pdf)
+        retrieval(manager=mnr, file_id=file_ids)
+        file_ids = int(file_ids)
+        file_ids = file_ids + 1
 
-    output_markdown = (output_dir / f"{input_pdf.stem}.md")
-    output_nodes = (output_dir / f"{input_pdf.stem}_nodes.json")
-
-    # ID ổn định để chạy lại pipeline sẽ thay index của lần chạy trước.
-    file_id = f"pipeline_{input_pdf.stem}"
-
-
-    if not input_pdf.is_file():
-        raise FileNotFoundError(
-            f"Không tìm thấy PDF: {input_pdf}\n"
-            "Hãy sửa biến input_pdf trong pipeline.py thành đường dẫn PDF thật."
-        )
-    print("=" * 70)
-    print("PDF:", input_pdf)
-    print("File ID:", file_id)
-    print("Markdown:", output_markdown)
-    print("Nodes:", output_nodes)
-    print("=" * 70)
-
-    documents = loading(input_pdf=input_pdf, output_markdown=output_markdown, file_id="1")
-
-    nodes, chunker = chunk(documents=documents, output_nodes=output_nodes)
-    
-    mnr = embedding(nodes=nodes, chunker=chunker, file_id="1", input_pdf=input_pdf)
-
-    retrieval(manager=mnr, file_id="1")
 
 
 
