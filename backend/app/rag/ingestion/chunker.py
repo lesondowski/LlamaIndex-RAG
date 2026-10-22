@@ -3,14 +3,17 @@ import json
 from collections.abc import Sequence
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser,SentenceSplitter
-CHUNK_SIZE = 700
-CHUNK_OVERLAP = 64
+CHUNK_SIZE = 450
+CHUNK_OVERLAP = 81 #18%
+
+
+
 class Chunking:
     
     def __init__( self,
         output_file: str | Path | None = None,
-        chunk_size: int = 550, # chunk_size này không phải là đơn vị ký tự, lưu ý đây là token chứ không phai ký tự
-        chunk_overlap: int = 64, # Mức độ chồng nhau của các câu, set vừa đủ để k bị mất ngữ cảnh
+        chunk_size: int = CHUNK_SIZE, # chunk_size này không phải là đơn vị ký tự, lưu ý đây là token chứ không phai ký tự
+        chunk_overlap: int = CHUNK_OVERLAP, # Mức độ chồng nhau của các câu, set vừa đủ để k bị mất ngữ cảnh
     ) -> None:
         
         self.output_file = Path(output_file) if output_file is not None else None

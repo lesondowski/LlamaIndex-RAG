@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from app.rag.ingestion.chunker import Chunking
+from app.rag.ingestion.chunker import Chunking, CHUNK_SIZE, CHUNK_OVERLAP
 from app.rag.ingestion.loader import PDFLoader
 from app.rag.indexing.index_manager import get_index_manager
 
@@ -17,7 +17,7 @@ def loading(input_pdf: str, output_markdown:str, file_id: str):
     return documents
 
 
-def chunk(documents, output_nodes, chunk_size=700, chunk_overlap=64):
+def chunk(documents, output_nodes, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     print("---------    CHUNK MARKDOWN DOCUMENTS   --------")
     chunker = Chunking(
         output_file=output_nodes,
