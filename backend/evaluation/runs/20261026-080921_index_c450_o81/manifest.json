@@ -1,0 +1,86 @@
+{
+  "kind": "eval_index",
+  "index": {
+    "chroma_dir": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\storage\\eval_indexes\\c450_o81",
+    "collection": "eval_c450_o81",
+    "vectors": 799,
+    "hnsw": {
+      "space": "cosine",
+      "ef_construction": 100,
+      "ef_search": 100,
+      "max_neighbors": 16,
+      "resize_factor": 1.2,
+      "sync_threshold": 1000
+    },
+    "metadata": {
+      "hnsw:space": "cosine",
+      "embed_model": "jina:jina-embeddings-v3"
+    },
+    "files": {
+      "1bc5769d59c3b0185d458b3399ac0dd0": {
+        "file_name": "ab25c6d4b36e4fe583cb7947c8157f65.pdf",
+        "nodes": 799,
+        "page_min": 1,
+        "page_max": 126,
+        "distinct_pages": 126,
+        "ids_sha256": "e5b42693dcc9ca6208465b1137995a65acc9014f6b88be23497c80b99b189378"
+      }
+    }
+  },
+  "corpus": {
+    "pdf": "ab25c6d4b36e4fe583cb7947c8157f65.pdf",
+    "sha256": "1bc5769d59c3b0185d458b3399ac0dd0e0b7978a4e5017c16ee2bcdf28e3791d",
+    "file_id": "1bc5769d59c3b0185d458b3399ac0dd0",
+    "page_source": "cache 1bc5769d59c3b018_pages.json"
+  },
+  "chunking": {
+    "chunk_size": 450,
+    "chunk_overlap": 81,
+    "pages": 126,
+    "nodes": 799,
+    "chars_mean": 330,
+    "chars_median": 338,
+    "chars_min": 1,
+    "chars_max": 1211
+  },
+  "timing": {
+    "ingest_seconds": 58.7
+  },
+  "run": {
+    "git": {
+      "commit": "c05a31c68861caf3dc0ffa2e3e4d5bbfedb68c7b",
+      "branch": "hnnnhu",
+      "dirty": true,
+      "changed_files": [
+        "D backend/app/api.py",
+        " M backend/evaluation/dense_retrieval_pdf.jsonl",
+        "?? FIX_SUMMARY.md",
+        "?? backend/evaluation/artifacts/",
+        "?? backend/evaluation/runs/",
+        "?? backend/payload.json",
+        "?? backend/requirements-lock.txt",
+        "?? backend/scripts/build_eval_index.py",
+        "?? backend/scripts/check_persistence.py",
+        "?? backend/scripts/check_reindex.py",
+        "?? backend/scripts/hello_llamaindex.py",
+        "?? backend/scripts/index_manifest.py",
+        "?? backend/scripts/reingest_from_nodes.py",
+        "?? backend/scripts/run_retrieval_eval.py",
+        "?? backend/scripts/run_utils.py",
+        "?? upload_pasted.py"
+      ]
+    },
+    "environment": {
+      "python": "3.12.10",
+      "os": "Windows-11-10.0.26300-SP0",
+      "packages": {
+        "llama-index-core": "0.14.25",
+        "llama-index-embeddings-jinaai": "0.7.0",
+        "llama-index-vector-stores-chroma": "0.6.0",
+        "llama-index-llms-google-genai": "0.11.3",
+        "llama-index-readers-llama-parse": "0.7.0",
+        "chromadb": "1.5.9"
+      }
+    }
+  }
+}

@@ -1,10 +1,34 @@
-{"question": "<Chất tồn tại ở dạng nào khi nhiệt độ tăng tới hàng triệu độ?>", "file_ids": ["1"], "relevant_pages": [10]}
-{"question": "<Các chất có thể chuyển thể sang những thể nào?>", "file_ids": ["1"], "relevant_pages": [8]}
-{"question": "<Các chất được cấu tạo từ các hạt riêng biệt gọi là gì?>", "file_ids": ["1"], "relevant_pages": [7]}
-{"question": "<Ai đã phát minh ra máy hơi nước?>", "file_ids": ["1"], "relevant_pages": [6]}
-{"question": "<Bài 5. Nhiệt nóng chảy riêng ở trang bao nhiêu?>", "file_ids": ["1"], "relevant_pages": [5]}
-{"question": "<Sách giáo khoa Vật lí 12 coi trọng điều gì?>", "file_ids": ["1"], "relevant_pages": [4]}
-{"question": "<Sách giáo khoa vật lí gồm bao nhiêu chương?>", "file_ids": ["1"], "relevant_pages": [3]}
-{"question": "<Cuốn sách tái bản lần thứ bao nhiêu?>", "file_ids": ["1"], "relevant_pages": [2]}
-{"question": "<Hãy giải thích sự hóa hơi?>", "file_ids": ["1"], "relevant_pages": [9]}
-{"question": "<Điều gì xảy ra khi các phân tử chuyển động hỗn loạn?>", "file_ids": ["1"], "relevant_pages": [10]}
+{"id": 1, "group": "thong_tin_chung", "question": "Sách giáo khoa Vật lí 12 do nhà xuất bản nào phát hành?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [2]}
+{"id": 2, "group": "thong_tin_chung", "question": "Ai là tổng chủ biên của sách giáo khoa Vật lí 12?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [2]}
+{"id": 3, "group": "thong_tin_chung", "question": "Ai là chủ biên của sách giáo khoa Vật lí 12?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [2]}
+{"id": 4, "group": "thong_tin_chung", "question": "Sách giáo khoa Vật lí 12 được tổ chức thành bao nhiêu chương?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [5]}
+{"id": 5, "group": "thong_tin_chung", "question": "Chương I của sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [5]}
+{"id": 6, "group": "thong_tin_chung", "question": "Chương II của sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [5]}
+{"id": 7, "group": "thong_tin_chung", "question": "Chương III của sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [5]}
+{"id": 8, "group": "thong_tin_chung", "question": "Chương IV của sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [5]}
+{"id": 9, "group": "cau_truc_chuong_1", "question": "Chương I Vật lí nhiệt gồm bao nhiêu bài học?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [5]}
+{"id": 10, "group": "cau_truc_chuong_1", "question": "Bài 1 trong sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [7]}
+{"id": 11, "group": "cau_truc_chuong_1", "question": "Bài 2 trong sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [11]}
+{"id": 12, "group": "cau_truc_chuong_1", "question": "Bài 3 trong sách Vật lí 12 có tên là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [16]}
+{"id": 13, "group": "cau_truc_chuong_1", "question": "Chương I Vật lí nhiệt đề cập đến những nội dung chính nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [6]}
+{"id": 14, "group": "cau_tao_chat", "question": "Bài 1 sử dụng mô hình nào để giải thích cấu tạo của chất?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [7]}
+{"id": 15, "group": "cau_tao_chat", "question": "Các chất thường tồn tại ở những thể nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 16, "group": "cau_tao_chat", "question": "Các phân tử trong chất khí chuyển động như thế nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 17, "group": "cau_tao_chat", "question": "Các phân tử cấu tạo nên chất có chuyển động không?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [7]}
+{"id": 18, "group": "cau_tao_chat", "question": "Khoảng cách giữa các phân tử trong chất rắn và chất khí khác nhau như thế nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 19, "group": "cau_tao_chat", "question": "Sự chuyển từ thể rắn sang thể lỏng được gọi là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 20, "group": "cau_tao_chat", "question": "Sự chuyển từ thể lỏng sang thể rắn được gọi là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 21, "group": "cau_tao_chat", "question": "Ở thể nào các phân tử thường ở cách xa nhau nhất?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 22, "group": "cau_tao_chat", "question": "Các phân tử trong chất rắn được sắp xếp như thế nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [8]}
+{"id": 23, "group": "noi_nang_dinh_luat_1", "question": "Nội năng của một vật là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [11]}
+{"id": 24, "group": "noi_nang_dinh_luat_1", "question": "Đơn vị đo nội năng là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [11]}
+{"id": 25, "group": "noi_nang_dinh_luat_1", "question": "Nội năng của một vật phụ thuộc vào những yếu tố nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [11]}
+{"id": 26, "group": "noi_nang_dinh_luat_1", "question": "Có những cách nào để làm thay đổi nội năng của một vật?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [12]}
+{"id": 27, "group": "noi_nang_dinh_luat_1", "question": "Định luật I của nhiệt động lực học được phát biểu như thế nào?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 28, "group": "noi_nang_dinh_luat_1", "question": "Công thức của định luật I nhiệt động lực học là gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 29, "group": "noi_nang_dinh_luat_1", "question": "Trong công thức định luật I nhiệt động lực học, A biểu thị đại lượng gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 30, "group": "noi_nang_dinh_luat_1", "question": "Trong công thức định luật I nhiệt động lực học, Q biểu thị đại lượng gì?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 31, "group": "noi_nang_dinh_luat_1", "question": "Khi Q lớn hơn 0, vật nhận hay truyền nhiệt lượng?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 32, "group": "noi_nang_dinh_luat_1", "question": "Khi Q nhỏ hơn 0, vật nhận hay truyền nhiệt lượng?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 33, "group": "noi_nang_dinh_luat_1", "question": "Khi A lớn hơn 0, vật nhận công hay thực hiện công?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}
+{"id": 34, "group": "noi_nang_dinh_luat_1", "question": "Khi A nhỏ hơn 0, vật nhận công hay thực hiện công?", "file_ids": ["VATLY12_KNTT"], "relevant_pages": [13]}

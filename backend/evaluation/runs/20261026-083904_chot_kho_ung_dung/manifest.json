@@ -1,0 +1,105 @@
+{
+  "kind": "index_manifest",
+  "index": {
+    "chroma_dir": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\storage\\chroma_db",
+    "collection": "SGKCTST",
+    "vectors": 1048,
+    "hnsw": {
+      "space": "cosine",
+      "ef_construction": 100,
+      "ef_search": 100,
+      "max_neighbors": 16,
+      "resize_factor": 1.2,
+      "sync_threshold": 1000
+    },
+    "embed_model_stored": "jina:jina-embeddings-v3",
+    "embed_model_current_config": "jina:jina-embeddings-v3",
+    "embed_model_match": true,
+    "chunking": {
+      "chunk_size": 1400,
+      "chunk_overlap": 252,
+      "source": "chunker.py (CHUNK_SIZE)"
+    }
+  },
+  "corpus": {
+    "8c765628da5e491d8f3013ff4e27669d": {
+      "file_name": "sach-giao-khoa-toan-12-tap-2-ket-noi-tri-thuc-voi-cuoc-song.pdf",
+      "nodes": 272,
+      "page_min": 1,
+      "page_max": 98,
+      "distinct_pages": 98,
+      "ids_sha256": "aa9d3bae4194533fc18a74c8d488227b57838efd4f0657dc26705d232ef44dd4",
+      "pdf_found": true,
+      "pdf_pages": 98,
+      "pdf_mb": 12.1,
+      "sha256": "427ebb73d52ee6fd28b53115f7c2f7224d2c2627caab64a3bb1e343394f7bff7",
+      "page_check": "khớp"
+    },
+    "ab25c6d4b36e4fe583cb7947c8157f65": {
+      "file_name": "12-shs-vat-li-12.pdf",
+      "nodes": 505,
+      "page_min": 1,
+      "page_max": 126,
+      "distinct_pages": 126,
+      "ids_sha256": "c8ca407c74af0060fab90f0afc06fe77c0f24df0f380ef12487e009392df8460",
+      "pdf_found": true,
+      "pdf_pages": 126,
+      "pdf_mb": 23.0,
+      "sha256": "1bc5769d59c3b0185d458b3399ac0dd0e0b7978a4e5017c16ee2bcdf28e3791d",
+      "page_check": "khớp"
+    },
+    "c892f0ddac454d1b8913848051b3a489": {
+      "file_name": "sach-giao-khoa-toan-12-tap-1-ket-noi-tri-thuc-voi-cuoc-song.pdf",
+      "nodes": 271,
+      "page_min": 1,
+      "page_max": 103,
+      "distinct_pages": 103,
+      "ids_sha256": "e72ecd308655677a6369d5606b399239d5b601d33a11b289c18387be7466ad96",
+      "pdf_found": true,
+      "pdf_pages": 103,
+      "pdf_mb": 12.4,
+      "sha256": "9191abd12ad159affeab08c958f43404ffc88217dd227667a44681d884865ac5",
+      "page_check": "khớp"
+    }
+  },
+  "run": {
+    "git": {
+      "commit": "c05a31c68861caf3dc0ffa2e3e4d5bbfedb68c7b",
+      "branch": "hnnnhu",
+      "dirty": true,
+      "changed_files": [
+        "D backend/app/api.py",
+        " M backend/app/rag/ingestion/chunker.py",
+        " M backend/app/rag/pipeline.py",
+        " M backend/evaluation/dense_retrieval_pdf.jsonl",
+        "?? FIX_SUMMARY.md",
+        "?? backend/evaluation/artifacts/",
+        "?? backend/evaluation/runs/",
+        "?? backend/payload.json",
+        "?? backend/requirements-lock.txt",
+        "?? backend/scripts/build_eval_index.py",
+        "?? backend/scripts/check_persistence.py",
+        "?? backend/scripts/check_reindex.py",
+        "?? backend/scripts/hello_llamaindex.py",
+        "?? backend/scripts/index_manifest.py",
+        "?? backend/scripts/reindex_from_cache.py",
+        "?? backend/scripts/reingest_from_nodes.py",
+        "?? backend/scripts/run_retrieval_eval.py",
+        "?? backend/scripts/run_utils.py",
+        "?? upload_pasted.py"
+      ]
+    },
+    "environment": {
+      "python": "3.12.10",
+      "os": "Windows-11-10.0.26300-SP0",
+      "packages": {
+        "llama-index-core": "0.14.25",
+        "llama-index-embeddings-jinaai": "0.7.0",
+        "llama-index-vector-stores-chroma": "0.6.0",
+        "llama-index-llms-google-genai": "0.11.3",
+        "llama-index-readers-llama-parse": "0.7.0",
+        "chromadb": "1.5.9"
+      }
+    }
+  }
+}

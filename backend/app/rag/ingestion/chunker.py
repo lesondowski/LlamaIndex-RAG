@@ -21,8 +21,8 @@ from llama_index.core.node_parser import MarkdownNodeParser,SentenceSplitter
 
 # Cấu hình chunk dùng chung, được import bởi app/routers/upload.py.
 # Đơn vị là TOKEN, không phải ký tự.
-CHUNK_SIZE = 700
-CHUNK_OVERLAP = 64
+CHUNK_SIZE = 1400
+CHUNK_OVERLAP = round(CHUNK_SIZE * 0.18)   # 252 token = 18% chunk_size; đã đo ở mục 4.6
 
 
 class Chunking:

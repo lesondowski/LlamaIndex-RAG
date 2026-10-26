@@ -1,0 +1,191 @@
+{
+  "kind": "retrieval_eval",
+  "index": {
+    "chroma_dir": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\storage\\eval_indexes\\c1400_o252",
+    "collection": "eval_c1400_o252",
+    "vectors": 505,
+    "metadata": {
+      "hnsw:space": "cosine",
+      "embed_model": "jina:jina-embeddings-v3"
+    },
+    "files": {
+      "1bc5769d59c3b0185d458b3399ac0dd0": {
+        "file_name": "ab25c6d4b36e4fe583cb7947c8157f65.pdf",
+        "nodes": 505,
+        "page_min": 1,
+        "page_max": 126,
+        "distinct_pages": 126,
+        "ids_sha256": "a85c59f6c2a9deed005c2fc07306b006a71bc33b36e7a231f88af64ee1e4b84c"
+      }
+    }
+  },
+  "dataset": {
+    "path": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\evaluation\\dense_retrieval_pdf.jsonl",
+    "sha256": "503eea186cb60bf5cd73a45b29b7581d9df88cc2ec8148ec11979e68f9753d0a",
+    "questions": 34,
+    "file_id_override": "1bc5769d59c3b0185d458b3399ac0dd0"
+  },
+  "method": {
+    "ks": [
+      3,
+      5,
+      8,
+      10
+    ],
+    "retrieve_once_at_k": 10,
+    "unit": "page",
+    "latency_includes": "embedding câu hỏi qua API Jina (mạng) + tìm kiếm Chroma; câu đầu tiên gồm cả khởi tạo mô hình (xem first_query_ms)"
+  },
+  "results": [
+    {
+      "k": 3,
+      "hit": 0.6764705882352942,
+      "found": 23,
+      "recall": 0.6764705882352942,
+      "mrr": 0.40196078431372545
+    },
+    {
+      "k": 5,
+      "hit": 0.8529411764705882,
+      "found": 29,
+      "recall": 0.8529411764705882,
+      "mrr": 0.446078431372549
+    },
+    {
+      "k": 8,
+      "hit": 0.8823529411764706,
+      "found": 30,
+      "recall": 0.8823529411764706,
+      "mrr": 0.45098039215686275
+    },
+    {
+      "k": 10,
+      "hit": 0.8823529411764706,
+      "found": 30,
+      "recall": 0.8823529411764706,
+      "mrr": 0.45098039215686275
+    }
+  ],
+  "latency": {
+    "p50_ms": 443.4,
+    "p95_ms": 1042.9,
+    "min_ms": 367.2,
+    "max_ms": 1482.0,
+    "first_query_ms": 1042.9
+  },
+  "misses_at_max_k": [
+    {
+      "id": 10,
+      "question": "Bài 1 trong sách Vật lí 12 có tên là gì?",
+      "relevant_pages": [
+        7
+      ],
+      "top_pages": [
+        3,
+        5,
+        4,
+        125,
+        33,
+        55,
+        31,
+        43,
+        123,
+        55
+      ]
+    },
+    {
+      "id": 11,
+      "question": "Bài 2 trong sách Vật lí 12 có tên là gì?",
+      "relevant_pages": [
+        11
+      ],
+      "top_pages": [
+        3,
+        5,
+        43,
+        55,
+        44,
+        45,
+        33,
+        31,
+        54,
+        4
+      ]
+    },
+    {
+      "id": 12,
+      "question": "Bài 3 trong sách Vật lí 12 có tên là gì?",
+      "relevant_pages": [
+        16
+      ],
+      "top_pages": [
+        3,
+        5,
+        44,
+        55,
+        33,
+        55,
+        54,
+        123,
+        56,
+        53
+      ]
+    },
+    {
+      "id": 16,
+      "question": "Các phân tử trong chất khí chuyển động như thế nào?",
+      "relevant_pages": [
+        8
+      ],
+      "top_pages": [
+        37,
+        36,
+        34,
+        36,
+        35,
+        35,
+        37,
+        49,
+        52,
+        10
+      ]
+    }
+  ],
+  "run": {
+    "git": {
+      "commit": "c05a31c68861caf3dc0ffa2e3e4d5bbfedb68c7b",
+      "branch": "hnnnhu",
+      "dirty": true,
+      "changed_files": [
+        "D backend/app/api.py",
+        " M backend/evaluation/dense_retrieval_pdf.jsonl",
+        "?? FIX_SUMMARY.md",
+        "?? backend/evaluation/artifacts/",
+        "?? backend/evaluation/runs/",
+        "?? backend/payload.json",
+        "?? backend/requirements-lock.txt",
+        "?? backend/scripts/build_eval_index.py",
+        "?? backend/scripts/check_persistence.py",
+        "?? backend/scripts/check_reindex.py",
+        "?? backend/scripts/hello_llamaindex.py",
+        "?? backend/scripts/index_manifest.py",
+        "?? backend/scripts/reingest_from_nodes.py",
+        "?? backend/scripts/run_retrieval_eval.py",
+        "?? backend/scripts/run_utils.py",
+        "?? upload_pasted.py"
+      ]
+    },
+    "environment": {
+      "python": "3.12.10",
+      "os": "Windows-11-10.0.26300-SP0",
+      "packages": {
+        "llama-index-core": "0.14.25",
+        "llama-index-embeddings-jinaai": "0.7.0",
+        "llama-index-vector-stores-chroma": "0.6.0",
+        "llama-index-llms-google-genai": "0.11.3",
+        "llama-index-readers-llama-parse": "0.7.0",
+        "chromadb": "1.5.9"
+      }
+    }
+  }
+}

@@ -65,3 +65,5 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+backend/evaluation/artifacts/

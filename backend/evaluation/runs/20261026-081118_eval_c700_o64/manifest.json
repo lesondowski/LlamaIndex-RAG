@@ -1,0 +1,191 @@
+{
+  "kind": "retrieval_eval",
+  "index": {
+    "chroma_dir": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\storage\\eval_indexes\\c700_o64",
+    "collection": "eval_c700_o64",
+    "vectors": 561,
+    "metadata": {
+      "hnsw:space": "cosine",
+      "embed_model": "jina:jina-embeddings-v3"
+    },
+    "files": {
+      "1bc5769d59c3b0185d458b3399ac0dd0": {
+        "file_name": "ab25c6d4b36e4fe583cb7947c8157f65.pdf",
+        "nodes": 561,
+        "page_min": 1,
+        "page_max": 126,
+        "distinct_pages": 126,
+        "ids_sha256": "b716718d7c057089e8378776fdfa68d92a898178b97ebd00eca03a09d35de10d"
+      }
+    }
+  },
+  "dataset": {
+    "path": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\evaluation\\dense_retrieval_pdf.jsonl",
+    "sha256": "503eea186cb60bf5cd73a45b29b7581d9df88cc2ec8148ec11979e68f9753d0a",
+    "questions": 34,
+    "file_id_override": "1bc5769d59c3b0185d458b3399ac0dd0"
+  },
+  "method": {
+    "ks": [
+      3,
+      5,
+      8,
+      10
+    ],
+    "retrieve_once_at_k": 10,
+    "unit": "page",
+    "latency_includes": "embedding câu hỏi qua API Jina (mạng) + tìm kiếm Chroma; câu đầu tiên gồm cả khởi tạo mô hình (xem first_query_ms)"
+  },
+  "results": [
+    {
+      "k": 3,
+      "hit": 0.6176470588235294,
+      "found": 21,
+      "recall": 0.6176470588235294,
+      "mrr": 0.38235294117647056
+    },
+    {
+      "k": 5,
+      "hit": 0.7647058823529411,
+      "found": 26,
+      "recall": 0.7647058823529411,
+      "mrr": 0.41764705882352937
+    },
+    {
+      "k": 8,
+      "hit": 0.8823529411764706,
+      "found": 30,
+      "recall": 0.8823529411764706,
+      "mrr": 0.4360294117647059
+    },
+    {
+      "k": 10,
+      "hit": 0.8823529411764706,
+      "found": 30,
+      "recall": 0.8823529411764706,
+      "mrr": 0.4360294117647059
+    }
+  ],
+  "latency": {
+    "p50_ms": 443.7,
+    "p95_ms": 896.8,
+    "min_ms": 401.8,
+    "max_ms": 4605.7,
+    "first_query_ms": 4605.7
+  },
+  "misses_at_max_k": [
+    {
+      "id": 10,
+      "question": "Bài 1 trong sách Vật lí 12 có tên là gì?",
+      "relevant_pages": [
+        7
+      ],
+      "top_pages": [
+        3,
+        5,
+        4,
+        4,
+        125,
+        33,
+        55,
+        43,
+        31,
+        5
+      ]
+    },
+    {
+      "id": 11,
+      "question": "Bài 2 trong sách Vật lí 12 có tên là gì?",
+      "relevant_pages": [
+        11
+      ],
+      "top_pages": [
+        3,
+        43,
+        55,
+        5,
+        4,
+        44,
+        45,
+        33,
+        31,
+        4
+      ]
+    },
+    {
+      "id": 12,
+      "question": "Bài 3 trong sách Vật lí 12 có tên là gì?",
+      "relevant_pages": [
+        16
+      ],
+      "top_pages": [
+        3,
+        44,
+        55,
+        5,
+        33,
+        55,
+        54,
+        4,
+        123,
+        5
+      ]
+    },
+    {
+      "id": 16,
+      "question": "Các phân tử trong chất khí chuyển động như thế nào?",
+      "relevant_pages": [
+        8
+      ],
+      "top_pages": [
+        37,
+        36,
+        35,
+        34,
+        36,
+        35,
+        37,
+        49,
+        52,
+        10
+      ]
+    }
+  ],
+  "run": {
+    "git": {
+      "commit": "c05a31c68861caf3dc0ffa2e3e4d5bbfedb68c7b",
+      "branch": "hnnnhu",
+      "dirty": true,
+      "changed_files": [
+        "D backend/app/api.py",
+        " M backend/evaluation/dense_retrieval_pdf.jsonl",
+        "?? FIX_SUMMARY.md",
+        "?? backend/evaluation/artifacts/",
+        "?? backend/evaluation/runs/",
+        "?? backend/payload.json",
+        "?? backend/requirements-lock.txt",
+        "?? backend/scripts/build_eval_index.py",
+        "?? backend/scripts/check_persistence.py",
+        "?? backend/scripts/check_reindex.py",
+        "?? backend/scripts/hello_llamaindex.py",
+        "?? backend/scripts/index_manifest.py",
+        "?? backend/scripts/reingest_from_nodes.py",
+        "?? backend/scripts/run_retrieval_eval.py",
+        "?? backend/scripts/run_utils.py",
+        "?? upload_pasted.py"
+      ]
+    },
+    "environment": {
+      "python": "3.12.10",
+      "os": "Windows-11-10.0.26300-SP0",
+      "packages": {
+        "llama-index-core": "0.14.25",
+        "llama-index-embeddings-jinaai": "0.7.0",
+        "llama-index-vector-stores-chroma": "0.6.0",
+        "llama-index-llms-google-genai": "0.11.3",
+        "llama-index-readers-llama-parse": "0.7.0",
+        "chromadb": "1.5.9"
+      }
+    }
+  }
+}

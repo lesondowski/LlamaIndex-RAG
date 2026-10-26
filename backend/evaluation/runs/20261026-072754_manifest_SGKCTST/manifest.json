@@ -1,0 +1,86 @@
+{
+  "kind": "index_manifest",
+  "index": {
+    "chroma_dir": "C:\\Users\\ngocn\\OneDrive\\Documents\\GitHub\\LlamaIndex-RAG\\backend\\storage\\chroma_db",
+    "collection": "SGKCTST",
+    "vectors": 778,
+    "hnsw": {
+      "space": "cosine",
+      "ef_construction": 100,
+      "ef_search": 100,
+      "max_neighbors": 16,
+      "resize_factor": 1.2,
+      "sync_threshold": 1000
+    },
+    "embed_model_stored": "jina:jina-embeddings-v3",
+    "embed_model_current_config": "jina:jina-embeddings-v3",
+    "embed_model_match": true,
+    "chunking": {
+      "chunk_size": 700,
+      "chunk_overlap": 64,
+      "source": "chunker.py (CHUNK_SIZE)"
+    }
+  },
+  "corpus": {
+    "8c765628da5e491d8f3013ff4e27669d": {
+      "file_name": "sach-giao-khoa-toan-12-tap-2-ket-noi-tri-thuc-voi-cuoc-song.pdf",
+      "nodes": 384,
+      "page_min": 1,
+      "page_max": 99,
+      "distinct_pages": 99,
+      "ids_sha256": "6d26686d30593351f39833ff775e6529f4246e4f6d831fb6eccc5fb285b72969",
+      "pdf_found": true,
+      "pdf_pages": 98,
+      "pdf_mb": 12.1,
+      "sha256": "427ebb73d52ee6fd28b53115f7c2f7224d2c2627caab64a3bb1e343394f7bff7",
+      "page_check": "lệch: metadata tới trang 99, PDF có 98 trang"
+    },
+    "c892f0ddac454d1b8913848051b3a489": {
+      "file_name": "sach-giao-khoa-toan-12-tap-1-ket-noi-tri-thuc-voi-cuoc-song.pdf",
+      "nodes": 394,
+      "page_min": 1,
+      "page_max": 104,
+      "distinct_pages": 104,
+      "ids_sha256": "c3a2b2633903ff14be4b917be364fa3252719c85846664ccf2aeb4f8389893df",
+      "pdf_found": true,
+      "pdf_pages": 103,
+      "pdf_mb": 12.4,
+      "sha256": "9191abd12ad159affeab08c958f43404ffc88217dd227667a44681d884865ac5",
+      "page_check": "lệch: metadata tới trang 104, PDF có 103 trang"
+    }
+  },
+  "run": {
+    "git": {
+      "commit": "c05a31c68861caf3dc0ffa2e3e4d5bbfedb68c7b",
+      "branch": "hnnnhu",
+      "dirty": true,
+      "changed_files": [
+        "D backend/app/api.py",
+        "?? FIX_SUMMARY.md",
+        "?? backend/payload.json",
+        "?? backend/requirements-lock.txt",
+        "?? backend/scripts/build_eval_index.py",
+        "?? backend/scripts/check_persistence.py",
+        "?? backend/scripts/check_reindex.py",
+        "?? backend/scripts/hello_llamaindex.py",
+        "?? backend/scripts/index_manifest.py",
+        "?? backend/scripts/reingest_from_nodes.py",
+        "?? backend/scripts/run_retrieval_eval.py",
+        "?? backend/scripts/run_utils.py",
+        "?? upload_pasted.py"
+      ]
+    },
+    "environment": {
+      "python": "3.12.10",
+      "os": "Windows-11-10.0.26300-SP0",
+      "packages": {
+        "llama-index-core": "0.14.25",
+        "llama-index-embeddings-jinaai": "0.7.0",
+        "llama-index-vector-stores-chroma": "0.6.0",
+        "llama-index-llms-google-genai": "0.11.3",
+        "llama-index-readers-llama-parse": "0.7.0",
+        "chromadb": "1.5.9"
+      }
+    }
+  }
+}
