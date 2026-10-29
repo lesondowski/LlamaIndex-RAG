@@ -1,0 +1,37 @@
+[project]
+name = "llamaindex-rag"
+version = "0.1.0"
+description = "RAG chatbot cho báo cáo tài chính"
+requires-python = ">=3.10"
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "python-dotenv",
+    "chromadb",
+    "llama-index-vector-stores-chroma",
+    "llama-index-core",
+    "llama-index-embeddings-huggingface",
+    "sentence-transformers",
+    "llama-index-llms-openai",
+    "unstructured",
+    "pymupdf",
+    "llama-index-embeddings-google-genai",
+    "llama-index-llms-google-genai",
+    "httpx>=0.28,<1",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "app",
+    "app.routers",
+    "app.rag",
+    "app.rag.ingestion",
+    "app.rag.indexing",
+    "app.rag.generation",
+]

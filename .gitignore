@@ -1,5 +1,6 @@
 # document private files
 document/
+document.md
 
 # Python
 __pycache__/
@@ -15,6 +16,7 @@ venv/
 env/
 .env
 .env.*
+pipeline_runs/
 
 # IDE
 .vscode/
@@ -22,7 +24,6 @@ env/
 .ipynb_checkpoints/
 
 # LlamaIndex / RAG
-storage/
 chroma_db/
 chroma/
 db/
@@ -32,8 +33,22 @@ vector_db/
 data/
 dataset/
 datasets/
-uploads/
 outputs/
+
+# Chặn mọi nội dung trong backend/storage/
+backend/storage/*
+
+# Ngoại lệ: giữ .gitkeep của storage/ (nếu có)
+!backend/storage/.gitkeep
+
+# Ngoại lệ: cho phép Git đi vào subfolder uploads/
+!backend/storage/uploads/
+
+# Chặn mọi file user upload trong uploads/
+backend/storage/uploads/*
+
+# Ngoại lệ: giữ .gitkeep của uploads/ (file duy nhất trong folder này lên Git)
+!backend/storage/uploads/.gitkeep
 
 # Models
 models/
