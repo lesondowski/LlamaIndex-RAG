@@ -18,3 +18,5 @@ llama-index-core
 llama-index-readers-llama-parse
 llama-cloud
 python-dotenv
+ragas==0.3.8
+google-genai

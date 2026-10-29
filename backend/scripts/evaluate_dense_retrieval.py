@@ -4,11 +4,14 @@ import math
 import time
 from pathlib import Path
 from dotenv import load_dotenv
+ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT / ".env")
+
 from app.rag.retrieval.retriever import Retriever
 
-# Chroma integration test, Đo top-k trên index hiện có
-
 TOP_K_VALUES = (3, 5, 8)
+
+# Chroma integration test, Đo top-k trên index hiện có
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -51,7 +54,6 @@ def main() -> None:
     script_path = Path(__file__).resolve()
     repo_root = script_path.parents[2]
     load_dotenv(repo_root / ".env")
-
     dataset_path = repo_root / "backend" / "evaluation" / "retrieval_pdf.jsonl"
     rows = load_dataset(dataset_path)
     if args.limit is not None:

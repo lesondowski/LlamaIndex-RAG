@@ -18,8 +18,8 @@ import json
 from collections.abc import Sequence
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser,SentenceSplitter
-CHUNK_SIZE = 450
-CHUNK_OVERLAP = 81 #18%
+CHUNK_SIZE = 700
+CHUNK_OVERLAP = 126 #18%
 
 
 
